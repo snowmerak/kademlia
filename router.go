@@ -28,7 +28,7 @@ type Router struct {
 	sessions *ConcurrentMap[[]byte, *Session]
 }
 
-func NewRouter(id []byte, config Config) (*Router, error) {
+func NewRouter(config Config) (*Router, error) {
 	strg, err := NewStore(config.StorePath, config.KBucketCount)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create store: %w", err)
@@ -45,7 +45,6 @@ func NewRouter(id []byte, config Config) (*Router, error) {
 	}
 
 	r := &Router{
-		id:           id,
 		hasher:       config.Hasher,
 		keyExchanger: config.KeyExchanger,
 		store:        strg,
@@ -78,21 +77,21 @@ func NewRouter(id []byte, config Config) (*Router, error) {
 
 			go func() {
 				idx := r.hasher.GetBucketIndex(r.id, sess.RemoteID())
-			if idx < 0 {
-				log.Printf("[Router] Invalid bucket index for node %x", sess.RemoteID())
-				return
-			}
+				if idx < 0 {
+					log.Printf("[Router] Invalid bucket index for node %x", sess.RemoteID())
+					return
+				}
 
-			h, p, err := net.SplitHostPort(sess.RemoteAddr())
-			if err != nil {
-				log.Printf("[Router] Failed to parse remote address %s: %v", sess.RemoteAddr(), err)
-				return
-			}
-			u, err := strconv.ParseInt(p, 10, 16)
-			if err != nil {
-				log.Printf("[Router] Failed to parse port %s: %v", p, err)
-				return
-			}
+				h, p, err := net.SplitHostPort(sess.RemoteAddr())
+				if err != nil {
+					log.Printf("[Router] Failed to parse remote address %s: %v", sess.RemoteAddr(), err)
+					return
+				}
+				u, err := strconv.ParseInt(p, 10, 16)
+				if err != nil {
+					log.Printf("[Router] Failed to parse port %s: %v", p, err)
+					return
+				}
 
 				c := &Contact{
 					ID:        sess.RemoteID(),
