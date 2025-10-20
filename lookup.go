@@ -65,13 +65,26 @@ func (r *Router) IterativeFindNode(ctx context.Context, targetID []byte, k int) 
 		queried[string(id)] = true
 	}
 
-	// Sort shortlist by distance
+	// Sort shortlist by distance (optimized to calculate distances once)
 	sortByDistance := func(contacts []*Contact) {
-		sort.Slice(contacts, func(i, j int) bool {
-			distI := xorDistance(contacts[i].ID, targetID)
-			distJ := xorDistance(contacts[j].ID, targetID)
-			return distI.Cmp(distJ) < 0
+		// Pre-calculate all distances once
+		distances := make([]contactWithDistance, len(contacts))
+		for i, contact := range contacts {
+			distances[i] = contactWithDistance{
+				contact:  contact,
+				distance: xorDistance(contact.ID, targetID),
+			}
+		}
+
+		// Sort using pre-calculated distances
+		sort.Slice(distances, func(i, j int) bool {
+			return distances[i].distance.Cmp(distances[j].distance) < 0
 		})
+
+		// Copy back to original slice
+		for i, d := range distances {
+			contacts[i] = d.contact
+		}
 	}
 
 	sortByDistance(shortlist)
