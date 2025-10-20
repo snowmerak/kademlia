@@ -16,20 +16,20 @@ import (
 
 // Session represents an encrypted connection with a peer node
 type Session struct {
-	router          *Router
-	conn            net.Conn
-	remoteID        []byte
-	remoteAddr      string
-	remotePublicKey []byte
+	router           *Router
+	conn             net.Conn
+	remoteID         []byte
+	remoteAddr       string
+	remotePublicKey  []byte
 	remoteListenPort int // The port the remote peer is listening on
-	encryptor       Encryptor
-	sharedSecret    []byte
-	writeMu         sync.Mutex
-	readMu          sync.Mutex
-	lastActivity    time.Time
-	activityMu      sync.RWMutex
-	closed          bool
-	closeMu         sync.Mutex
+	encryptor        Encryptor
+	sharedSecret     []byte
+	writeMu          sync.Mutex
+	readMu           sync.Mutex
+	lastActivity     time.Time
+	activityMu       sync.RWMutex
+	closed           bool
+	closeMu          sync.Mutex
 
 	// Response callbacks for async RPC
 	responseCallbacks *ConcurrentMap[string, func([]byte, error)]
@@ -37,10 +37,11 @@ type Session struct {
 
 // HandshakeMessage represents the initial key exchange message
 type HandshakeMessage struct {
-	NodeID      []byte
-	PublicKey   []byte
-	Timestamp   int64
-	ListenPort  int // The port this node is listening on for incoming connections
+	NodeID     []byte
+	PublicKey  []byte // Encapsulation key for MLKEM
+	CipherText []byte // Optional: cipher text from client (empty in initial message from server)
+	Timestamp  int64
+	ListenPort int // The port this node is listening on for incoming connections
 }
 
 // Marshal serializes the handshake message
@@ -57,6 +58,13 @@ func (h *HandshakeMessage) Marshal() []byte {
 	binary.BigEndian.PutUint32(temp[:4], uint32(len(h.PublicKey)))
 	buf.Write(temp[:4])
 	buf.Write(h.PublicKey)
+
+	// CipherText length + data
+	binary.BigEndian.PutUint32(temp[:4], uint32(len(h.CipherText)))
+	buf.Write(temp[:4])
+	if len(h.CipherText) > 0 {
+		buf.Write(h.CipherText)
+	}
 
 	// Timestamp
 	binary.BigEndian.PutUint64(temp, uint64(h.Timestamp))
@@ -94,6 +102,18 @@ func (h *HandshakeMessage) Unmarshal(data []byte) error {
 		return fmt.Errorf("failed to read PublicKey: %w", err)
 	}
 
+	// Read CipherText
+	if _, err := buf.Read(temp[:4]); err != nil {
+		return fmt.Errorf("failed to read CipherText length: %w", err)
+	}
+	cipherTextLen := binary.BigEndian.Uint32(temp[:4])
+	if cipherTextLen > 0 {
+		h.CipherText = make([]byte, cipherTextLen)
+		if _, err := buf.Read(h.CipherText); err != nil {
+			return fmt.Errorf("failed to read CipherText: %w", err)
+		}
+	}
+
 	// Read Timestamp
 	if _, err := buf.Read(temp); err != nil {
 		return fmt.Errorf("failed to read Timestamp: %w", err)
@@ -109,34 +129,35 @@ func (h *HandshakeMessage) Unmarshal(data []byte) error {
 	return nil
 }
 
-// InitiateSession initiates a connection and performs key exchange as client
+// InitiateSession initiates a connection and performs key exchange as client (MLKEM)
 func InitiateSession(
 	conn net.Conn,
 	router *Router,
 ) (*Session, error) {
-	log.Printf("[InitiateSession] Starting handshake with %s", conn.RemoteAddr())
+	log.Printf("[InitiateSession] Starting MLKEM handshake with %s", conn.RemoteAddr())
 	localID := router.ID()
-	localPublicKey, err := router.PublicKey()
+	localEncapsulationKey, err := router.PublicKey()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get public key: %w", err)
+		return nil, fmt.Errorf("failed to get encapsulation key: %w", err)
 	}
 
-	// Send our handshake message
+	// Step 1: Send our encapsulation key to server
 	handshake := &HandshakeMessage{
 		NodeID:     localID,
-		PublicKey:  localPublicKey,
+		PublicKey:  localEncapsulationKey,
+		CipherText: nil, // Empty in first message
 		Timestamp:  time.Now().Unix(),
 		ListenPort: router.listenAddr.Port,
 	}
 
-	log.Printf("[InitiateSession] Sending handshake: NodeID=%x, PublicKey=%x, ListenPort=%d", handshake.NodeID, handshake.PublicKey, handshake.ListenPort)
-	
+	log.Printf("[InitiateSession] Sending encapsulation key: NodeID=%x, ListenPort=%d", handshake.NodeID, handshake.ListenPort)
+
 	handshakeData := handshake.Marshal()
 	if err := writeFrame(conn, handshakeData); err != nil {
 		return nil, fmt.Errorf("failed to send handshake: %w", err)
 	}
 
-	// Receive peer's handshake message
+	// Step 2: Receive server's response (encapsulation key + cipher text)
 	peerHandshakeData, err := readFrame(conn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to receive handshake: %w", err)
@@ -147,18 +168,55 @@ func InitiateSession(
 		return nil, fmt.Errorf("failed to unmarshal peer handshake: %w", err)
 	}
 
-	log.Printf("[InitiateSession] Received peer handshake: NodeID=%x, PublicKey=%x, ListenPort=%d", peerHandshake.NodeID, peerHandshake.PublicKey, peerHandshake.ListenPort)
+	log.Printf("[InitiateSession] Received peer handshake: NodeID=%x, ListenPort=%d",
+		peerHandshake.NodeID, peerHandshake.ListenPort)
 
-	// Compute shared secret using Router's Handshake method
-	sharedSecret, err := router.Handshake(peerHandshake.PublicKey)
+	// Step 3: Encapsulate with peer's encapsulation key to get our cipher text
+	clientCipherText, clientSharedSecret, err := router.EncapsulateSecret(peerHandshake.PublicKey)
 	if err != nil {
-		return nil, fmt.Errorf("failed to compute shared secret: %w", err)
+		return nil, fmt.Errorf("failed to encapsulate: %w", err)
 	}
 
-	log.Printf("[InitiateSession] Computed shared secret: %x", sharedSecret)
+	log.Printf("[InitiateSession] Client encapsulated: SharedSecret=(hidden)")
+
+	// Step 4: Decapsulate server's cipher text to get server's shared secret
+	serverSharedSecret, err := router.DecapsulateSecret(peerHandshake.CipherText)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decapsulate server cipher text: %w", err)
+	}
+
+	log.Printf("[InitiateSession] Server shared secret decapsulated: (hidden)")
+
+	// Step 5: Send our cipher text back to server
+	finalHandshake := &HandshakeMessage{
+		NodeID:     localID,
+		PublicKey:  localEncapsulationKey,
+		CipherText: clientCipherText,
+		Timestamp:  time.Now().Unix(),
+		ListenPort: router.listenAddr.Port,
+	}
+
+	finalHandshakeData := finalHandshake.Marshal()
+	if err := writeFrame(conn, finalHandshakeData); err != nil {
+		return nil, fmt.Errorf("failed to send final handshake: %w", err)
+	}
+
+	log.Printf("[InitiateSession] Sent cipher text")
+
+	// Step 6: XOR both shared secrets for final key
+	if len(clientSharedSecret) != len(serverSharedSecret) {
+		return nil, fmt.Errorf("shared secret length mismatch: %d != %d", len(clientSharedSecret), len(serverSharedSecret))
+	}
+
+	finalSharedSecret := make([]byte, len(clientSharedSecret))
+	for i := range clientSharedSecret {
+		finalSharedSecret[i] = clientSharedSecret[i] ^ serverSharedSecret[i]
+	}
+
+	log.Printf("[InitiateSession] Final shared secret derived: (hidden)")
 
 	// Create encryptor
-	encryptor, err := NewXChaCha20Poly1305(sharedSecret)
+	encryptor, err := NewXChaCha20Poly1305(finalSharedSecret)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create encryptor: %w", err)
 	}
@@ -171,21 +229,21 @@ func InitiateSession(
 		remotePublicKey:   peerHandshake.PublicKey,
 		remoteListenPort:  peerHandshake.ListenPort,
 		encryptor:         encryptor,
-		sharedSecret:      sharedSecret,
+		sharedSecret:      finalSharedSecret,
 		lastActivity:      time.Now(),
 		closed:            false,
 		responseCallbacks: NewConcurrentMap[string, func([]byte, error)](),
 	}, nil
 }
 
-// AcceptSession accepts a connection and performs key exchange as server
+// AcceptSession accepts a connection and performs key exchange as server (MLKEM)
 func AcceptSession(
 	conn net.Conn,
 	router *Router,
 ) (*Session, error) {
-	log.Printf("[AcceptSession] Starting handshake with %s", conn.RemoteAddr())
-	
-	// Receive peer's handshake message first
+	log.Printf("[AcceptSession] Starting MLKEM handshake with %s", conn.RemoteAddr())
+
+	// Step 1: Receive client's encapsulation key
 	peerHandshakeData, err := readFrame(conn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to receive handshake: %w", err)
@@ -195,40 +253,76 @@ func AcceptSession(
 	if err := peerHandshake.Unmarshal(peerHandshakeData); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal peer handshake: %w", err)
 	}
-	
-	log.Printf("[AcceptSession] Received peer handshake: NodeID=%x, PublicKey=%x, ListenPort=%d", peerHandshake.NodeID, peerHandshake.PublicKey, peerHandshake.ListenPort)
+
+	log.Printf("[AcceptSession] Received peer handshake: NodeID=%x, ListenPort=%d",
+		peerHandshake.NodeID, peerHandshake.ListenPort)
 
 	localID := router.ID()
-	localPublicKey, err := router.PublicKey()
+	localEncapsulationKey, err := router.PublicKey()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get public key: %w", err)
+		return nil, fmt.Errorf("failed to get encapsulation key: %w", err)
 	}
 
-	// Send our handshake message
+	// Step 2: Encapsulate with client's encapsulation key to get our cipher text
+	serverCipherText, serverSharedSecret, err := router.EncapsulateSecret(peerHandshake.PublicKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encapsulate: %w", err)
+	}
+
+	log.Printf("[AcceptSession] Server encapsulated: SharedSecret=(hidden)")
+
+	// Step 3: Send our encapsulation key + cipher text back to client
 	handshake := &HandshakeMessage{
 		NodeID:     localID,
-		PublicKey:  localPublicKey,
+		PublicKey:  localEncapsulationKey,
+		CipherText: serverCipherText,
 		Timestamp:  time.Now().Unix(),
 		ListenPort: router.listenAddr.Port,
 	}
 
-	log.Printf("[AcceptSession] Sending handshake: NodeID=%x, PublicKey=%x, ListenPort=%d", handshake.NodeID, handshake.PublicKey, handshake.ListenPort)
+	log.Printf("[AcceptSession] Sending handshake: NodeID=%x, ListenPort=%d",
+		handshake.NodeID, handshake.ListenPort)
 
 	handshakeData := handshake.Marshal()
 	if err := writeFrame(conn, handshakeData); err != nil {
 		return nil, fmt.Errorf("failed to send handshake: %w", err)
 	}
 
-	// Compute shared secret using Router's Handshake method
-	sharedSecret, err := router.Handshake(peerHandshake.PublicKey)
+	// Step 4: Receive client's cipher text
+	clientCipherData, err := readFrame(conn)
 	if err != nil {
-		return nil, fmt.Errorf("failed to compute shared secret: %w", err)
+		return nil, fmt.Errorf("failed to receive client cipher text: %w", err)
 	}
 
-	log.Printf("[AcceptSession] Computed shared secret: %x", sharedSecret)
+	var clientCipherMsg HandshakeMessage
+	if err := clientCipherMsg.Unmarshal(clientCipherData); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal client cipher text: %w", err)
+	}
+
+	log.Printf("[AcceptSession] Received client cipher text")
+
+	// Step 5: Decapsulate client's cipher text
+	clientSharedSecret, err := router.DecapsulateSecret(clientCipherMsg.CipherText)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decapsulate client cipher text: %w", err)
+	}
+
+	log.Printf("[AcceptSession] Client shared secret decapsulated: (hidden)")
+
+	// Step 6: XOR both shared secrets for final key
+	if len(serverSharedSecret) != len(clientSharedSecret) {
+		return nil, fmt.Errorf("shared secret length mismatch: %d != %d", len(serverSharedSecret), len(clientSharedSecret))
+	}
+
+	finalSharedSecret := make([]byte, len(serverSharedSecret))
+	for i := range serverSharedSecret {
+		finalSharedSecret[i] = serverSharedSecret[i] ^ clientSharedSecret[i]
+	}
+
+	log.Printf("[AcceptSession] Final shared secret derived: (hidden)")
 
 	// Create encryptor
-	encryptor, err := NewXChaCha20Poly1305(sharedSecret)
+	encryptor, err := NewXChaCha20Poly1305(finalSharedSecret)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create encryptor: %w", err)
 	}
@@ -241,7 +335,7 @@ func AcceptSession(
 		remotePublicKey:   peerHandshake.PublicKey,
 		remoteListenPort:  peerHandshake.ListenPort,
 		encryptor:         encryptor,
-		sharedSecret:      sharedSecret,
+		sharedSecret:      finalSharedSecret,
 		lastActivity:      time.Now(),
 		closed:            false,
 		responseCallbacks: NewConcurrentMap[string, func([]byte, error)](),
@@ -409,7 +503,7 @@ func (s *Session) HandleIncoming() {
 			if callback, ok := s.responseCallbacks.Load(messageID); ok {
 				// This is a response - invoke callback and remove from map
 				s.responseCallbacks.Delete(messageID)
-				
+
 				// For custom RPCs (type > 2), strip the messageID from payload
 				if rpcType > 2 && len(payload) >= 16 {
 					actualPayload := payload[16:]

@@ -207,20 +207,37 @@ func (r *Router) PublicKey() ([]byte, error) {
 	return pubKey, nil
 }
 
-func (r *Router) Handshake(peerPublicKey []byte) ([]byte, error) {
-	log.Printf("[Router.Handshake] Computing shared secret for peer public key: %x", peerPublicKey)
-	privKey, err := r.store.GetPrivateKey()
+// EncapsulateSecret generates cipher text from peer's encapsulation key
+// Used by client to create cipher text to send to server
+func (r *Router) EncapsulateSecret(peerEncapsulationKey []byte) (cipherText []byte, sharedSecret []byte, err error) {
+	log.Printf("[Router.EncapsulateSecret] Encapsulating with peer encapsulation key: %x", peerEncapsulationKey)
+	
+	cipherText, sharedSecret, err = r.keyExchanger.Encapsulate(peerEncapsulationKey)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get private key from store: %w", err)
-	}
-
-	log.Printf("[Router.Handshake] Using private key: %x", privKey)
-	sharedSecret, err := r.keyExchanger.ComputeSharedSecret(privKey, peerPublicKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to compute shared secret: %w", err)
+		return nil, nil, fmt.Errorf("failed to encapsulate: %w", err)
 	}
 	
-	log.Printf("[Router.Handshake] Computed shared secret: %x", sharedSecret)
+	log.Printf("[Router.EncapsulateSecret] Generated cipher text: %x, shared secret: %x", cipherText, sharedSecret)
+	return cipherText, sharedSecret, nil
+}
+
+// DecapsulateSecret extracts shared secret from cipher text
+// Used by server to derive shared secret from received cipher text
+func (r *Router) DecapsulateSecret(cipherText []byte) ([]byte, error) {
+	log.Printf("[Router.DecapsulateSecret] Decapsulating cipher text: %x", cipherText)
+	
+	decapsulationKey, err := r.store.GetPrivateKey()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get decapsulation key from store: %w", err)
+	}
+	
+	log.Printf("[Router.DecapsulateSecret] Using decapsulation key: %x", decapsulationKey)
+	sharedSecret, err := r.keyExchanger.Decapsulate(decapsulationKey, cipherText)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decapsulate: %w", err)
+	}
+	
+	log.Printf("[Router.DecapsulateSecret] Computed shared secret: %x", sharedSecret)
 	return sharedSecret, nil
 }
 

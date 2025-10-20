@@ -1,50 +1,27 @@
 package kademlia
 
 import (
-	"crypto/ecdh"
 	"crypto/mlkem"
-	"crypto/rand"
 	"fmt"
 )
 
 type KeyExchanger interface {
-	GenerateNewKeyPair() (privateKey []byte, publicKey []byte, err error)
-	ComputeSharedSecret(privateKey []byte, peerPublicKey []byte) ([]byte, error)
-}
+	// GenerateNewKeyPair generates a new key pair for KEM
+	// Returns: decapsulation key (private), encapsulation key (public)
+	GenerateNewKeyPair() (decapsulationKey []byte, encapsulationKey []byte, err error)
 
-type X25519KeyExchanger struct{}
+	// Encapsulate generates a cipher text and shared secret from encapsulation key
+	// Used by client to generate cipher text to send to server
+	Encapsulate(encapsulationKey []byte) (cipherText []byte, sharedSecret []byte, err error)
 
-func (ke *X25519KeyExchanger) GenerateNewKeyPair() (privateKey []byte, publicKey []byte, err error) {
-	privKey, err := ecdh.X25519().GenerateKey(rand.Reader)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to generate X25519 key pair: %w", err)
-	}
-
-	return privKey.Bytes(), privKey.PublicKey().Bytes(), nil
-}
-
-func (ke *X25519KeyExchanger) ComputeSharedSecret(privateKey []byte, peerPublicKey []byte) ([]byte, error) {
-	privKey, err := ecdh.X25519().NewPrivateKey(privateKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create X25519 private key: %w", err)
-	}
-
-	pubKey, err := ecdh.X25519().NewPublicKey(peerPublicKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create X25519 public key: %w", err)
-	}
-
-	sharedSecret, err := privKey.ECDH(pubKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to compute shared secret: %w", err)
-	}
-
-	return sharedSecret, nil
+	// Decapsulate extracts shared secret from cipher text using decapsulation key
+	// Used by server to derive shared secret from received cipher text
+	Decapsulate(decapsulationKey []byte, cipherText []byte) (sharedSecret []byte, err error)
 }
 
 type MLKEMKeyExchanger struct{}
 
-func (ke *MLKEMKeyExchanger) GenerateNewKeyPair() (privateKey []byte, publicKey []byte, err error) {
+func (ke *MLKEMKeyExchanger) GenerateNewKeyPair() (decapsulationKey []byte, encapsulationKey []byte, err error) {
 	dk, err := mlkem.GenerateKey1024()
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to generate MLKEM key pair: %w", err)
@@ -53,15 +30,27 @@ func (ke *MLKEMKeyExchanger) GenerateNewKeyPair() (privateKey []byte, publicKey 
 	return dk.Bytes(), dk.EncapsulationKey().Bytes(), nil
 }
 
-func (ke *MLKEMKeyExchanger) ComputeSharedSecret(seed []byte, peerCipherText []byte) ([]byte, error) {
-	dk, err := mlkem.NewDecapsulationKey1024(seed)
+func (ke *MLKEMKeyExchanger) Encapsulate(encapsulationKey []byte) (cipherText []byte, sharedSecret []byte, err error) {
+	ek, err := mlkem.NewEncapsulationKey1024(encapsulationKey)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create MLKEM private key: %w", err)
+		return nil, nil, fmt.Errorf("failed to create MLKEM encapsulation key: %w", err)
 	}
 
-	sharedSecret, err := dk.Decapsulate(peerCipherText)
+	// Note: Encapsulate() returns (sharedKey, ciphertext) in that order!
+	sharedSecret, cipherText = ek.Encapsulate()
+
+	return cipherText, sharedSecret, nil
+}
+
+func (ke *MLKEMKeyExchanger) Decapsulate(decapsulationKey []byte, cipherText []byte) (sharedSecret []byte, err error) {
+	dk, err := mlkem.NewDecapsulationKey1024(decapsulationKey)
 	if err != nil {
-		return nil, fmt.Errorf("failed to compute shared secret: %w", err)
+		return nil, fmt.Errorf("failed to create MLKEM decapsulation key: %w", err)
+	}
+
+	sharedSecret, err = dk.Decapsulate(cipherText)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decapsulate: %w", err)
 	}
 
 	return sharedSecret, nil
