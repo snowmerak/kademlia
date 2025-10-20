@@ -6,8 +6,8 @@ A Go implementation of the Kademlia Distributed Hash Table (DHT) with secure enc
 
 ### Core Functionality
 - **Kademlia DHT Protocol**: Complete implementation of the Kademlia distributed hash table algorithm
+- **Post-Quantum Cryptography**: MLKEM1024 (ML-KEM/Kyber) for quantum-resistant key encapsulation
 - **Encrypted Communication**: All node-to-node communication is encrypted using XChaCha20-Poly1305
-- **Secure Key Exchange**: Supports X25519 elliptic curve key exchange for establishing shared secrets
 - **Persistent Storage**: Uses CockroachDB Pebble for efficient key-value storage
 - **Flexible Hashing**: Supports multiple hash algorithms (SHA-256, BLAKE3)
 - **Custom RPC Handlers**: Extensible architecture for adding custom message types
@@ -41,7 +41,7 @@ import (
 func main() {
     // Create router configuration
     config := kademlia.Config{
-        KeyExchanger:   &kademlia.X25519KeyExchanger{},
+        KeyExchanger:   &kademlia.MLKEMKeyExchanger{},
         Hasher:         &kademlia.ExtendedIDHasher{}, // BLAKE3
         StorePath:      "./data",
         KBucketCount:   8,
@@ -95,8 +95,9 @@ Handles encrypted peer-to-peer connections:
 - Connection lifecycle
 
 #### Key Exchange (`key_exchange.go`)
-Provides cryptographic key agreement:
-- `X25519KeyExchanger`: Elliptic curve Diffie-Hellman
+Provides post-quantum cryptographic key encapsulation:
+- `MLKEMKeyExchanger`: MLKEM1024 (ML-KEM/Kyber) for quantum-resistant key establishment
+- Implements 3-way handshake for mutual key encapsulation
 - Extensible interface for custom key exchange mechanisms
 
 #### Hashing (`hashed_id.go`)
@@ -113,21 +114,38 @@ Persistent key-value storage using Pebble:
 
 ### Network Protocol
 
-#### Handshake
+#### MLKEM Handshake (3-way)
 ```
-Client                    Server
-  |                          |
-  |--- HandshakeMessage ---->|
-  |    (NodeID, PubKey,      |
-  |     Timestamp, Port)     |
-  |                          |
-  |<-- HandshakeMessage -----|
-  |    (NodeID, PubKey,      |
-  |     Timestamp, Port)     |
-  |                          |
-  |   Compute Shared Secret  |
-  |                          |
+Client                                    Server
+  |                                          |
+  |--- Step 1: Encapsulation Key ---------->|
+  |    (NodeID, EncapKey, Port)              |
+  |                                          |
+  |                                     Encapsulate
+  |                                     with client's key
+  |                                          |
+  |<-- Step 2: Encap Key + Cipher Text ------|
+  |    (NodeID, EncapKey, CipherText, Port)  |
+  |                                          |
+Encapsulate with                             |
+server's key                                 |
+Decapsulate server's                         |
+cipher text                                  |
+  |                                          |
+  |--- Step 3: Client Cipher Text --------->|
+  |    (NodeID, CipherText, Port)            |
+  |                                          |
+  |                                     Decapsulate
+  |                                     client's cipher text
+  |                                          |
+XOR both shared secrets          XOR both shared secrets
+  |                                          |
 ```
+
+Both client and server:
+1. Encapsulate with peer's encapsulation key → generate cipher text + shared secret
+2. Decapsulate peer's cipher text → obtain peer's shared secret
+3. XOR both shared secrets → final session key
 
 #### Message Format
 All messages after handshake are encrypted:
@@ -275,7 +293,7 @@ GetAllContacts() []*Contact
 ### Router Config
 ```go
 type Config struct {
-    KeyExchanger   KeyExchanger  // X25519KeyExchanger or custom
+    KeyExchanger   KeyExchanger  // MLKEMKeyExchanger or custom
     Hasher         Hasher        // StandardIDHasher or ExtendedIDHasher
     StorePath      string        // Path for Pebble database
     KBucketCount   int           // Number of k-buckets (typically 8)
@@ -285,7 +303,8 @@ type Config struct {
 ```
 
 ### Key Exchange Implementations
-- `X25519KeyExchanger`: Uses Curve25519 for ECDH (recommended)
+- `MLKEMKeyExchanger`: Uses MLKEM1024 (ML-KEM/Kyber) for post-quantum key encapsulation (default)
+- Implements 3-way handshake for mutual authentication and key establishment
 - Implement `KeyExchanger` interface for custom algorithms
 
 ### Hashing Implementations
@@ -344,7 +363,8 @@ kademlia/
 ## Dependencies
 
 - `github.com/cockroachdb/pebble` - Key-value storage
-- `golang.org/x/crypto` - Cryptographic primitives
+- `crypto/mlkem` - Post-quantum MLKEM1024 (ML-KEM/Kyber) key encapsulation
+- `golang.org/x/crypto` - XChaCha20-Poly1305 authenticated encryption
 - `google.golang.org/protobuf` - Protocol buffers
 - `lukechampine.com/blake3` - BLAKE3 hashing
 - `github.com/google/uuid` - UUID generation
@@ -365,10 +385,12 @@ kademlia/
 5. Return k closest nodes found
 
 ### Security
-- All connections use encrypted sessions (XChaCha20-Poly1305)
-- Key exchange via X25519 ECDH
-- Each session has unique shared secret
-- Nonce management prevents replay attacks
+- **Post-Quantum Cryptography**: MLKEM1024 (ML-KEM/Kyber) for quantum-resistant key exchange
+- **Authenticated Encryption**: XChaCha20-Poly1305 for all session data
+- **3-Way Handshake**: Mutual key encapsulation ensures both parties contribute to session key
+- **Unique Session Keys**: XOR combination of bidirectional shared secrets
+- **Nonce Management**: Prevents replay attacks
+- **Secure Logging**: Cryptographic material is never logged (only connection metadata)
 
 ## Performance Considerations
 
@@ -388,5 +410,6 @@ Contributions are welcome! Please feel free to submit issues and pull requests.
 ## References
 
 - [Kademlia: A Peer-to-peer Information System Based on the XOR Metric](https://pdos.csail.mit.edu/~petar/papers/maymounkov-kademlia-lncs.pdf)
+- [ML-KEM (FIPS 203): Module-Lattice-Based Key-Encapsulation Mechanism](https://csrc.nist.gov/pubs/fips/203/final)
+- [Kyber: A CCA-secure module-lattice-based KEM](https://pq-crystals.org/kyber/)
 - [XChaCha20-Poly1305](https://tools.ietf.org/html/draft-irtf-cfrg-xchacha)
-- [X25519](https://cr.yp.to/ecdh.html)
