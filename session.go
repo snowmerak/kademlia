@@ -12,18 +12,19 @@ import (
 
 // Session represents an encrypted connection with a peer node
 type Session struct {
-	conn         net.Conn
-	remoteID     []byte
-	remoteAddr   string
+	router          *Router
+	conn            net.Conn
+	remoteID        []byte
+	remoteAddr      string
 	remotePublicKey []byte
-	encryptor    Encryptor
-	sharedSecret []byte
-	writeMu      sync.Mutex
-	readMu       sync.Mutex
-	lastActivity time.Time
-	activityMu   sync.RWMutex
-	closed       bool
-	closeMu      sync.Mutex
+	encryptor       Encryptor
+	sharedSecret    []byte
+	writeMu         sync.Mutex
+	readMu          sync.Mutex
+	lastActivity    time.Time
+	activityMu      sync.RWMutex
+	closed          bool
+	closeMu         sync.Mutex
 }
 
 // HandshakeMessage represents the initial key exchange message
@@ -136,6 +137,7 @@ func InitiateSession(
 	}
 
 	return &Session{
+		router:          router,
 		conn:            conn,
 		remoteID:        peerHandshake.NodeID,
 		remoteAddr:      conn.RemoteAddr().String(),
@@ -194,6 +196,7 @@ func AcceptSession(
 	}
 
 	return &Session{
+		router:          router,
 		conn:            conn,
 		remoteID:        peerHandshake.NodeID,
 		remoteAddr:      conn.RemoteAddr().String(),
@@ -225,6 +228,8 @@ func (s *Session) SendMessage(data []byte) error {
 	defer s.writeMu.Unlock()
 
 	if err := writeFrame(s.conn, encrypted); err != nil {
+		// Connection error - close session and remove from map
+		go s.Close()
 		return fmt.Errorf("failed to send frame: %w", err)
 	}
 
@@ -247,12 +252,16 @@ func (s *Session) ReceiveMessage() ([]byte, error) {
 
 	encrypted, err := readFrame(s.conn)
 	if err != nil {
+		// Connection error - close session and remove from map
+		go s.Close()
 		return nil, fmt.Errorf("failed to receive frame: %w", err)
 	}
 
 	// Decrypt the message
 	decrypted, err := s.encryptor.Decrypt(encrypted)
 	if err != nil {
+		// Decryption error - close session and remove from map
+		go s.Close()
 		return nil, fmt.Errorf("failed to decrypt message: %w", err)
 	}
 
@@ -286,7 +295,7 @@ func (s *Session) LastActivity() time.Time {
 	return s.lastActivity
 }
 
-// Close closes the session and underlying connection
+// Close closes the session and underlying connection, and removes it from the router's session map
 func (s *Session) Close() error {
 	s.closeMu.Lock()
 	defer s.closeMu.Unlock()
@@ -296,6 +305,13 @@ func (s *Session) Close() error {
 	}
 
 	s.closed = true
+
+	// Remove from router's session map
+	if s.router != nil {
+		s.router.sessions.Delete(s.remoteID)
+	}
+
+	// Close the underlying connection
 	return s.conn.Close()
 }
 
