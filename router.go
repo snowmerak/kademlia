@@ -3,6 +3,7 @@ package kademlia
 import (
 	"fmt"
 	"net"
+	"strconv"
 )
 
 type Config struct {
@@ -66,10 +67,35 @@ func NewRouter(id []byte, config Config) (*Router, error) {
 				continue
 			}
 
-			old, swapped := r.sessions.Swap(sess.remoteID, sess)
+			old, swapped := r.sessions.Swap(sess.RemoteID(), sess)
 			if swapped && old != nil {
 				old.Close()
 			}
+
+			go func() {
+				idx := r.hasher.GetBucketIndex(r.id, sess.RemoteID())
+				if idx < 0 {
+					return
+				}
+
+				h, p, err := net.SplitHostPort(sess.RemoteAddr())
+				if err != nil {
+					return
+				}
+				u, err := strconv.ParseInt(p, 10, 16)
+				if err != nil {
+					return
+				}
+
+				c := &Contact{
+					ID:        sess.RemoteID(),
+					PublicKey: sess.PublicKey(),
+					Host:      h,
+					Port:      int(u),
+				}
+
+				r.store.AddNodeToBucket(idx, sess.RemoteID(), c.Marshal())
+			}()
 		}
 	}()
 
