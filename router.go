@@ -34,7 +34,7 @@ type Router struct {
 	listenAddr   *net.TCPAddr
 
 	sessions *ConcurrentMap[string, *Session]
-	
+
 	// Custom RPC handlers
 	customHandlers *ConcurrentMap[uint32, RPCHandler]
 }
@@ -129,7 +129,7 @@ func (r *Router) RegisterHandler(rpcType uint32, handler RPCHandler) error {
 	if rpcType == 1 || rpcType == 2 {
 		return fmt.Errorf("RPC type %d is reserved for built-in handlers", rpcType)
 	}
-	
+
 	r.customHandlers.Store(rpcType, handler)
 	log.Printf("[Router] Registered custom handler for RPC type %d", rpcType)
 	return nil
@@ -211,12 +211,12 @@ func (r *Router) PublicKey() ([]byte, error) {
 // Used by client to create cipher text to send to server
 func (r *Router) EncapsulateSecret(peerEncapsulationKey []byte) (cipherText []byte, sharedSecret []byte, err error) {
 	log.Printf("[Router.EncapsulateSecret] Encapsulating with peer encapsulation key: %x", peerEncapsulationKey)
-	
+
 	cipherText, sharedSecret, err = r.keyExchanger.Encapsulate(peerEncapsulationKey)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to encapsulate: %w", err)
 	}
-	
+
 	log.Printf("[Router.EncapsulateSecret] Generated cipher text: %x, shared secret: %x", cipherText, sharedSecret)
 	return cipherText, sharedSecret, nil
 }
@@ -224,20 +224,16 @@ func (r *Router) EncapsulateSecret(peerEncapsulationKey []byte) (cipherText []by
 // DecapsulateSecret extracts shared secret from cipher text
 // Used by server to derive shared secret from received cipher text
 func (r *Router) DecapsulateSecret(cipherText []byte) ([]byte, error) {
-	log.Printf("[Router.DecapsulateSecret] Decapsulating cipher text: %x", cipherText)
-	
 	decapsulationKey, err := r.store.GetPrivateKey()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get decapsulation key from store: %w", err)
 	}
-	
-	log.Printf("[Router.DecapsulateSecret] Using decapsulation key: %x", decapsulationKey)
+
 	sharedSecret, err := r.keyExchanger.Decapsulate(decapsulationKey, cipherText)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decapsulate: %w", err)
 	}
-	
-	log.Printf("[Router.DecapsulateSecret] Computed shared secret: %x", sharedSecret)
+
 	return sharedSecret, nil
 }
 
@@ -278,7 +274,7 @@ func (r *Router) StoreNode(c *Contact) error {
 
 func (r *Router) FindNearbyNodes(targetID []byte, count int) ([]*Contact, error) {
 	idx := r.hasher.GetBucketIndex(r.id, targetID)
-	
+
 	// If looking for ourselves (idx < 0), search all buckets
 	if idx < 0 {
 		log.Printf("[Router] FindNearbyNodes: target is self, searching all buckets for %d nodes", count)
