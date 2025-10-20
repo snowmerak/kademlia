@@ -2,11 +2,11 @@ package kademlia
 
 import "sync"
 
-type ConcurrentMap[K, V any] struct {
+type ConcurrentMap[K comparable, V any] struct {
 	m sync.Map
 }
 
-func NewConcurrentMap[K, V any]() *ConcurrentMap[K, V] {
+func NewConcurrentMap[K comparable, V any]() *ConcurrentMap[K, V] {
 	return &ConcurrentMap[K, V]{}
 }
 

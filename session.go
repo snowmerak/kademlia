@@ -309,7 +309,7 @@ func (s *Session) Close() error {
 
 	// Remove from router's session map
 	if s.router != nil {
-		s.router.sessions.Delete(s.remoteID)
+		s.router.sessions.Delete(string(s.remoteID))
 	}
 
 	// Close the underlying connection

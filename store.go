@@ -3,6 +3,7 @@ package kademlia
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -187,7 +188,7 @@ func (s *Store) AddNodeToBucket(bucketIndex int, nodeID []byte, data []byte) (*C
 	bucketData, err := s.Get([]byte(key))
 	var bucket Bucket
 	if err != nil {
-		if err == pebble.ErrNotFound {
+		if errors.Is(err, pebble.ErrNotFound) {
 			bucket = Bucket{
 				Index:    int64(bucketIndex),
 				Count:    0,

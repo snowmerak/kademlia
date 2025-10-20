@@ -28,7 +28,7 @@ type Router struct {
 	kBucketCount int
 	listenAddr   *net.TCPAddr
 
-	sessions *ConcurrentMap[[]byte, *Session]
+	sessions *ConcurrentMap[string, *Session]
 }
 
 func NewRouter(config Config) (*Router, error) {
@@ -54,7 +54,7 @@ func NewRouter(config Config) (*Router, error) {
 		tcpListener:  tcpLis,
 		kBucketCount: config.KBucketCount,
 		listenAddr:   tcpAddr,
-		sessions:     NewConcurrentMap[[]byte, *Session](),
+		sessions:     NewConcurrentMap[string, *Session](),
 	}
 
 	go func() {
@@ -70,7 +70,7 @@ func NewRouter(config Config) (*Router, error) {
 				continue
 			}
 
-			old, swapped := r.sessions.Swap(sess.RemoteID(), sess)
+			old, swapped := r.sessions.Swap(string(sess.RemoteID()), sess)
 			if swapped && old != nil {
 				old.Close()
 			}
@@ -302,7 +302,7 @@ func (r *Router) DialNode(c *Contact) error {
 		return fmt.Errorf("failed to initiate session: %w", err)
 	}
 
-	old, swapped := r.sessions.Swap(sess.RemoteID(), sess)
+	old, swapped := r.sessions.Swap(string(sess.RemoteID()), sess)
 	if swapped && old != nil {
 		old.Close()
 	}
@@ -314,7 +314,7 @@ func (r *Router) DialNode(c *Contact) error {
 }
 
 func (r *Router) GetSession(peerID []byte) (*Session, bool) {
-	sess, ok := r.sessions.Load(peerID)
+	sess, ok := r.sessions.Load(string(peerID))
 	return sess, ok
 }
 
@@ -326,7 +326,7 @@ func (r *Router) GetOrCreateSession(nodeID []byte) (*Session, error) {
 			return sess, nil
 		}
 		// Session is closed, remove it
-		r.sessions.Delete(nodeID)
+		r.sessions.Delete(string(nodeID))
 	}
 
 	// No session exists, need to dial
