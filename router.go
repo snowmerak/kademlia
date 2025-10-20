@@ -112,6 +112,10 @@ func (r *Router) Handshake(peerPublicKey []byte) ([]byte, error) {
 
 func (r *Router) FindNode(targetID []byte) (*Contact, error) {
 	idx := r.hasher.GetBucketIndex(r.id, targetID)
+	if idx < 0 {
+		return nil, fmt.Errorf("invalid bucket index")
+	}
+
 	data, err := r.store.GetNodeFromBucket(idx, targetID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find node in store: %w", err)
@@ -128,6 +132,10 @@ func (r *Router) FindNode(targetID []byte) (*Contact, error) {
 func (r *Router) StoreNode(c *Contact) error {
 	data := c.Marshal()
 	idx := r.hasher.GetBucketIndex(r.id, c.ID)
+	if idx < 0 {
+		return fmt.Errorf("invalid bucket index")
+	}
+
 	if err := r.store.AddNodeToBucket(idx, c.ID, data); err != nil {
 		return fmt.Errorf("failed to store contact in store: %w", err)
 	}
@@ -137,6 +145,10 @@ func (r *Router) StoreNode(c *Contact) error {
 
 func (r *Router) FindNearbyNodes(targetID []byte, count int) ([]*Contact, error) {
 	idx := r.hasher.GetBucketIndex(r.id, targetID)
+	if idx < 0 {
+		return nil, fmt.Errorf("invalid bucket index")
+	}
+
 	originIdx := idx
 
 	result := []*Contact{}
