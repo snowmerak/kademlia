@@ -73,6 +73,9 @@ func NewRouter(id []byte, config Config) (*Router, error) {
 				old.Close()
 			}
 
+			// Start handling incoming RPC messages
+			go sess.HandleIncoming()
+
 			go func() {
 				idx := r.hasher.GetBucketIndex(r.id, sess.RemoteID())
 			if idx < 0 {
@@ -302,10 +305,45 @@ func (r *Router) DialNode(c *Contact) error {
 		old.Close()
 	}
 
+	// Start handling incoming RPC messages
+	go sess.HandleIncoming()
+
 	return nil
 }
 
 func (r *Router) GetSession(peerID []byte) (*Session, bool) {
 	sess, ok := r.sessions.Load(peerID)
 	return sess, ok
+}
+
+// GetOrCreateSession returns existing session or creates new one by dialing the node
+func (r *Router) GetOrCreateSession(nodeID []byte) (*Session, error) {
+	// Try to get existing session
+	if sess, ok := r.GetSession(nodeID); ok {
+		if !sess.IsClosed() {
+			return sess, nil
+		}
+		// Session is closed, remove it
+		r.sessions.Delete(nodeID)
+	}
+
+	// No session exists, need to dial
+	// Find contact info from store
+	contact, err := r.FindNode(nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("node %x not found in routing table: %w", nodeID, err)
+	}
+
+	// Dial the contact
+	if err := r.DialNode(contact); err != nil {
+		return nil, fmt.Errorf("failed to dial node %x: %w", nodeID, err)
+	}
+
+	// Get the newly created session
+	sess, ok := r.GetSession(nodeID)
+	if !ok {
+		return nil, fmt.Errorf("session not found after dial")
+	}
+
+	return sess, nil
 }
