@@ -4,6 +4,7 @@ go 1.25.3
 
 require (
 	github.com/cockroachdb/pebble v1.1.5
+	github.com/google/uuid v1.3.0
 	golang.org/x/crypto v0.43.0
 	google.golang.org/protobuf v1.33.0
 	lukechampine.com/blake3 v1.4.1
