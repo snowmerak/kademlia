@@ -86,14 +86,9 @@ func NewRouter(config Config) (*Router, error) {
 					return
 				}
 
-				h, p, err := net.SplitHostPort(sess.RemoteAddr())
+				h, _, err := net.SplitHostPort(sess.RemoteAddr())
 				if err != nil {
 					log.Printf("[Router] Failed to parse remote address %s: %v", sess.RemoteAddr(), err)
-					return
-				}
-				u, err := strconv.ParseInt(p, 10, 32)
-				if err != nil {
-					log.Printf("[Router] Failed to parse port %s: %v", p, err)
 					return
 				}
 
@@ -101,10 +96,12 @@ func NewRouter(config Config) (*Router, error) {
 					ID:        sess.RemoteID(),
 					PublicKey: sess.PublicKey(),
 					Host:      h,
-					Port:      int(u),
+					Port:      sess.RemoteListenPort(),
 				}
 
+				log.Printf("[Router] Storing node %x in routing table at bucket %d (Host: %s, Port: %d)", c.ID, idx, c.Host, c.Port)
 				r.store.AddNodeToBucket(idx, sess.RemoteID(), c.Marshal())
+				log.Printf("[Router] Successfully stored node %x in routing table", c.ID)
 			}()
 		}
 	}()
