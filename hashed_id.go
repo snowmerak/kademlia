@@ -11,6 +11,7 @@ import (
 type IDHasher interface {
 	Hash(data []byte) []byte
 	GetBucketIndex(myID, otherID []byte) int
+	MaxIDLength() int
 }
 
 type LegacyIDHasher struct{}
@@ -48,6 +49,10 @@ func (h *LegacyIDHasher) GetBucketIndex(myID, otherID []byte) int {
 	bucketIndex := 159 - lz
 
 	return bucketIndex
+}
+
+func (h *LegacyIDHasher) MaxIDLength() int {
+	return 160
 }
 
 type ExtendedIDHasher struct{}
@@ -90,4 +95,8 @@ func (h *ExtendedIDHasher) GetBucketIndex(myID, otherID []byte) int {
 	bucketIndex := 255 - lz
 
 	return bucketIndex
+}
+
+func (h *ExtendedIDHasher) MaxIDLength() int {
+	return 256
 }
