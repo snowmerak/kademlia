@@ -229,7 +229,7 @@ func createNode(dbPath, listenHost string, listenPort, kBucketCount int) (*kadem
 	hasher := &kademlia.ExtendedIDHasher{}
 
 	// Use X25519 key exchange
-	keyExchanger := &kademlia.X25519KeyExchanger{}
+	keyExchanger := &kademlia.MLKEMKeyExchanger{}
 
 	// Create router with config
 	config := kademlia.Config{
