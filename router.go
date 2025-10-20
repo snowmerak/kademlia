@@ -20,6 +20,10 @@ type Config struct {
 	ListenAddrPort int
 }
 
+// RPCHandler is a function that handles custom RPC requests
+// It receives the session, raw payload (without RPC type prefix), and returns response data (with RPC type prefix) or error
+type RPCHandler func(sess *Session, payload []byte) ([]byte, error)
+
 type Router struct {
 	id           []byte
 	hasher       IDHasher
@@ -30,6 +34,9 @@ type Router struct {
 	listenAddr   *net.TCPAddr
 
 	sessions *ConcurrentMap[string, *Session]
+	
+	// Custom RPC handlers
+	customHandlers *ConcurrentMap[uint32, RPCHandler]
 }
 
 func NewRouter(config Config) (*Router, error) {
@@ -49,13 +56,14 @@ func NewRouter(config Config) (*Router, error) {
 	}
 
 	r := &Router{
-		hasher:       config.Hasher,
-		keyExchanger: config.KeyExchanger,
-		store:        strg,
-		tcpListener:  tcpLis,
-		kBucketCount: config.KBucketCount,
-		listenAddr:   tcpAddr,
-		sessions:     NewConcurrentMap[string, *Session](),
+		hasher:         config.Hasher,
+		keyExchanger:   config.KeyExchanger,
+		store:          strg,
+		tcpListener:    tcpLis,
+		kBucketCount:   config.KBucketCount,
+		listenAddr:     tcpAddr,
+		sessions:       NewConcurrentMap[string, *Session](),
+		customHandlers: NewConcurrentMap[uint32, RPCHandler](),
 	}
 
 	go func() {
@@ -111,6 +119,32 @@ func NewRouter(config Config) (*Router, error) {
 
 func (r *Router) Close() error {
 	return r.store.Close()
+}
+
+// RegisterHandler registers a custom RPC handler for the given RPC type
+// The handler will be called when a message with the specified RPC type is received
+// Returns an error if the RPC type is already used by built-in handlers (1, 2)
+func (r *Router) RegisterHandler(rpcType uint32, handler RPCHandler) error {
+	// Check if it's a reserved RPC type
+	if rpcType == 1 || rpcType == 2 {
+		return fmt.Errorf("RPC type %d is reserved for built-in handlers", rpcType)
+	}
+	
+	r.customHandlers.Store(rpcType, handler)
+	log.Printf("[Router] Registered custom handler for RPC type %d", rpcType)
+	return nil
+}
+
+// UnregisterHandler removes a custom RPC handler
+func (r *Router) UnregisterHandler(rpcType uint32) {
+	r.customHandlers.Delete(rpcType)
+	log.Printf("[Router] Unregistered custom handler for RPC type %d", rpcType)
+}
+
+// HasHandler checks if a custom handler is registered for the given RPC type
+func (r *Router) HasHandler(rpcType uint32) bool {
+	_, ok := r.customHandlers.Load(rpcType)
+	return ok
 }
 
 func (r *Router) Initialize(force bool) error {

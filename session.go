@@ -409,7 +409,14 @@ func (s *Session) HandleIncoming() {
 			if callback, ok := s.responseCallbacks.Load(messageID); ok {
 				// This is a response - invoke callback and remove from map
 				s.responseCallbacks.Delete(messageID)
-				callback(data, nil)
+				
+				// For custom RPCs (type > 2), strip the messageID from payload
+				if rpcType > 2 && len(payload) >= 16 {
+					actualPayload := payload[16:]
+					callback(actualPayload, nil)
+				} else {
+					callback(data, nil)
+				}
 				continue
 			}
 		}
@@ -443,6 +450,11 @@ func (s *Session) extractMessageID(rpcType uint32, payload []byte) string {
 		var msg rpc.FindNodeResponse
 		if err := proto.Unmarshal(payload, &msg); err == nil && msg.Header != nil {
 			return string(msg.Header.MessageId)
+		}
+	default:
+		// Custom RPC types (> 2) have messageID as first 16 bytes
+		if rpcType > 2 && len(payload) >= 16 {
+			return string(payload[:16])
 		}
 	}
 	return ""

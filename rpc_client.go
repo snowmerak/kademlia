@@ -152,3 +152,49 @@ func (r *Router) SendFindNode(ctx context.Context, nodeID []byte, targetID []byt
 
 	return nil
 }
+
+// SendCustomRPC sends a custom RPC request with async callback
+// rpcType: custom RPC type (must be > 2, as 1 and 2 are reserved)
+// payload: serialized request data (without RPC type prefix and without messageID)
+// callback: function to handle response (data includes RPC type prefix but no messageID)
+// Note: This function automatically prepends a 16-byte messageID to the payload for request/response matching
+func (r *Router) SendCustomRPC(ctx context.Context, nodeID []byte, rpcType uint32, payload []byte, callback func([]byte, error)) error {
+	if rpcType <= 2 {
+		return fmt.Errorf("RPC type %d is reserved for built-in handlers", rpcType)
+	}
+
+	sess, err := r.GetOrCreateSession(nodeID)
+	if err != nil {
+		return fmt.Errorf("failed to get session: %w", err)
+	}
+
+	messageID := uuid.New()
+
+	// Build request with RPC type prefix + messageID + payload
+	data := make([]byte, 4+16+len(payload))
+	binary.BigEndian.PutUint32(data[:4], rpcType)
+	copy(data[4:20], messageID[:])
+	copy(data[20:], payload)
+
+	// Register response callback
+	sess.RegisterResponseCallback(string(messageID[:]), callback)
+
+	// Set up timeout to clean up callback
+	if deadline, ok := ctx.Deadline(); ok {
+		timeout := time.Until(deadline)
+		go func() {
+			time.Sleep(timeout)
+			if cb, ok := sess.responseCallbacks.Load(string(messageID[:])); ok {
+				sess.responseCallbacks.Delete(string(messageID[:]))
+				cb(nil, fmt.Errorf("request timeout"))
+			}
+		}()
+	}
+
+	// Send request
+	if err := sess.SendMessage(data); err != nil {
+		return fmt.Errorf("failed to send custom RPC: %w", err)
+	}
+
+	return nil
+}

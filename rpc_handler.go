@@ -24,6 +24,28 @@ func (r *Router) HandleRPC(sess *Session, rpcType uint32, payload []byte) ([]byt
 	case RPCTypeFindNode:
 		return r.handleFindNode(sess, payload)
 	default:
+		// Check for custom handlers
+		if handler, ok := r.customHandlers.Load(rpcType); ok {
+			// For custom RPCs (type > 2), extract messageID and pass only the actual payload
+			if rpcType > 2 && len(payload) >= 16 {
+				messageID := payload[:16]
+				actualPayload := payload[16:]
+				
+				// Call the handler with actual payload
+				respPayload, err := handler(sess, actualPayload)
+				if err != nil {
+					return nil, err
+				}
+				
+				// Build response: [4-byte rpcType][16-byte messageID][respPayload]
+				result := make([]byte, 4+16+len(respPayload))
+				binary.BigEndian.PutUint32(result[:4], rpcType)
+				copy(result[4:20], messageID)
+				copy(result[20:], respPayload)
+				return result, nil
+			}
+			return handler(sess, payload)
+		}
 		return nil, fmt.Errorf("unknown RPC type: %d", rpcType)
 	}
 }
