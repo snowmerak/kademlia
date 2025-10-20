@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"sync"
 	"time"
@@ -327,6 +328,41 @@ func (s *Session) updateActivity() {
 	s.activityMu.Lock()
 	defer s.activityMu.Unlock()
 	s.lastActivity = time.Now()
+}
+
+// HandleIncoming handles incoming RPC messages from the peer
+func (s *Session) HandleIncoming() {
+	for {
+		data, err := s.ReceiveMessage()
+		if err != nil {
+			// Connection closed or error - ReceiveMessage already called Close()
+			return
+		}
+
+		// RPC type is first 4 bytes (uint32)
+		if len(data) < 4 {
+			log.Printf("[Session] Message too short from %x: %d bytes", s.RemoteID(), len(data))
+			continue
+		}
+
+		rpcType := binary.BigEndian.Uint32(data[:4])
+		payload := data[4:]
+
+		// Route to handler
+		response, err := s.router.HandleRPC(s, rpcType, payload)
+		if err != nil {
+			log.Printf("[Session] RPC error from %x: %v", s.RemoteID(), err)
+			continue
+		}
+
+		// Send response
+		if response != nil {
+			if err := s.SendMessage(response); err != nil {
+				log.Printf("[Session] Failed to send RPC response: %v", err)
+				return
+			}
+		}
+	}
 }
 
 // writeFrame writes a length-prefixed frame to the connection
