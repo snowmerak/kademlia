@@ -8,6 +8,7 @@ type Config struct {
 	KeyExchanger KeyExchanger
 	Hasher       IDHasher
 	StorePath    string
+	KBucketCount int
 }
 
 type Router struct {
@@ -18,7 +19,7 @@ type Router struct {
 }
 
 func NewRouter(id []byte, config Config) (*Router, error) {
-	strg, err := NewStore(config.StorePath)
+	strg, err := NewStore(config.StorePath, config.KBucketCount)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create store: %w", err)
 	}

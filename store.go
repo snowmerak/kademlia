@@ -15,15 +15,16 @@ type Store struct {
 	kBucketCount int
 }
 
-func NewStore(dbPath string) (*Store, error) {
+func NewStore(dbPath string, kBucketCount int) (*Store, error) {
 	db, err := pebble.Open(dbPath, &pebble.Options{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to open Pebble DB: %w", err)
 	}
 
 	return &Store{
-		store:      db,
-		bucketLock: &sync.RWMutex{},
+		store:        db,
+		bucketLock:   &sync.RWMutex{},
+		kBucketCount: kBucketCount,
 	}, nil
 }
 
