@@ -22,6 +22,8 @@ type Router struct {
 	tcpListener  *net.TCPListener
 	kBucketCount int
 	listenAddr   *net.TCPAddr
+
+	sessions *ConcurrentMap[[]byte, *Session]
 }
 
 func NewRouter(id []byte, config Config) (*Router, error) {
@@ -40,7 +42,7 @@ func NewRouter(id []byte, config Config) (*Router, error) {
 		return nil, fmt.Errorf("failed to start TCP listener: %w", err)
 	}
 
-	return &Router{
+	r := &Router{
 		id:           id,
 		hasher:       config.Hasher,
 		keyExchanger: config.KeyExchanger,
@@ -48,7 +50,30 @@ func NewRouter(id []byte, config Config) (*Router, error) {
 		tcpListener:  tcpLis,
 		kBucketCount: config.KBucketCount,
 		listenAddr:   tcpAddr,
-	}, nil
+		sessions:     NewConcurrentMap[[]byte, *Session](),
+	}
+
+	go func() {
+		for {
+			conn, err := tcpLis.AcceptTCP()
+			if err != nil {
+				continue
+			}
+
+			sess, err := AcceptSession(conn, r)
+			if err != nil {
+				conn.Close()
+				continue
+			}
+
+			old, swapped := r.sessions.Swap(sess.remoteID, sess)
+			if swapped && old != nil {
+				old.Close()
+			}
+		}
+	}()
+
+	return r, nil
 }
 
 func (r *Router) Close() error {
