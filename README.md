@@ -9,7 +9,7 @@ A Go implementation of the Kademlia Distributed Hash Table (DHT) with secure enc
 - **Post-Quantum Cryptography**: MLKEM1024 (ML-KEM/Kyber) for quantum-resistant key encapsulation
 - **Encrypted Communication**: All node-to-node communication is encrypted using XChaCha20-Poly1305
 - **Persistent Storage**: Uses CockroachDB Pebble for efficient key-value storage
-- **Flexible Hashing**: Supports multiple hash algorithms (SHA-256, BLAKE3)
+- **Flexible Hashing**: Supports multiple hash algorithms (SHA-1, BLAKE3)
 - **Custom RPC Handlers**: Extensible architecture for adding custom message types
 
 ### Network Operations
@@ -308,7 +308,7 @@ type Config struct {
 - Implement `KeyExchanger` interface for custom algorithms
 
 ### Hashing Implementations
-- `StandardIDHasher`: SHA-256 based node IDs
+- `LegacyIDHasher`: SHA-1 based node IDs
 - `ExtendedIDHasher`: BLAKE3 based node IDs (faster, recommended)
 - Implement `Hasher` interface for custom hash functions
 
