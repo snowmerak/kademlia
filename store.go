@@ -221,8 +221,8 @@ func (s *Store) AddNodeToBucket(bucketIndex int, nodeID []byte, data []byte) err
 }
 
 func (s *Store) GetNodeFromBucket(bucketIndex int, nodeID []byte) ([]byte, error) {
-	s.bucketLock.RLock()
-	defer s.bucketLock.RUnlock()
+	s.bucketLock.Lock()
+	defer s.bucketLock.Unlock()
 
 	key := fmt.Sprintf("bucket:%d", bucketIndex)
 	bucketData, err := s.Get([]byte(key))
@@ -252,8 +252,8 @@ func (s *Store) GetNodeFromBucket(bucketIndex int, nodeID []byte) ([]byte, error
 }
 
 func (s *Store) GetAllNodesInBucket(bucketIndex int) ([][]byte, error) {
-	s.bucketLock.RLock()
-	defer s.bucketLock.RUnlock()
+	s.bucketLock.Lock()
+	defer s.bucketLock.Unlock()
 
 	key := fmt.Sprintf("bucket:%d", bucketIndex)
 	bucketData, err := s.Get([]byte(key))
