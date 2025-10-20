@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package kademlia;
+
+option go_package = "github.com/snowmerak/kademlia/rpc";
+
+// Common message header for all RPC messages
+message RPCHeader {
+  bytes message_id = 1;    // UUID for request/response matching
+  bytes sender_id = 2;     // Sender's Kademlia node ID
+  string sender_addr = 3;  // Sender's address "host:port"
+  int64 timestamp = 4;     // Unix timestamp in milliseconds
+}
+
+// Contact information for a node
+message Contact {
+  bytes id = 1;           // Kademlia node ID
+  bytes public_key = 2;   // Node's public key
+  string host = 3;        // IP address or hostname
+  int32 port = 4;         // UDP/TCP port
+}
+
+// ============================================================================
+// PING RPC - Check if a node is alive and reachable
+// ============================================================================
+
+message PingRequest {
+  RPCHeader header = 1;
+  bytes public_key = 2;    // Sender's public key for verification
+}
+
+message PingResponse {
+  RPCHeader header = 1;
+  bytes public_key = 2;    // Responder's public key
+}
+
+// ============================================================================
+// FIND_NODE RPC - Find k closest nodes to a target ID
+// ============================================================================
+
+message FindNodeRequest {
+  RPCHeader header = 1;
+  bytes target_id = 2;     // Target Kademlia ID to search for
+}
+
+message FindNodeResponse {
+  RPCHeader header = 1;
+  repeated Contact contacts = 2;  // Up to k closest nodes
+}
