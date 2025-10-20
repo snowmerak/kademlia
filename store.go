@@ -179,7 +179,7 @@ func (b *Bucket) Unmarshal(data []byte) error {
 	return nil
 }
 
-func (s *Store) AddNodeToBucket(bucketIndex int, nodeID []byte, data []byte) error {
+func (s *Store) AddNodeToBucket(bucketIndex int, nodeID []byte, data []byte) (*Contact, error) {
 	s.bucketLock.Lock()
 	defer s.bucketLock.Unlock()
 
@@ -195,11 +195,11 @@ func (s *Store) AddNodeToBucket(bucketIndex int, nodeID []byte, data []byte) err
 				SetValue: [][]byte{},
 			}
 		} else {
-			return fmt.Errorf("failed to get bucket data: %w", err)
+			return nil, fmt.Errorf("failed to get bucket data: %w", err)
 		}
 	} else {
 		if err := bucket.Unmarshal(bucketData); err != nil {
-			return fmt.Errorf("failed to unmarshal bucket data: %w", err)
+			return nil, fmt.Errorf("failed to unmarshal bucket data: %w", err)
 		}
 	}
 
@@ -207,17 +207,23 @@ func (s *Store) AddNodeToBucket(bucketIndex int, nodeID []byte, data []byte) err
 	bucket.SetValue = append(bucket.SetValue, data)
 	bucket.Count++
 
+	removed := (*Contact)(nil)
 	if bucket.Count > int64(s.kBucketCount) {
 		bucket.Count = int64(s.kBucketCount)
+		removedData := bucket.SetValue[0]
+		removed = &Contact{}
+		if err := removed.Unmarshal(removedData); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal removed contact: %w", err)
+		}
 		bucket.SetKey = bucket.SetKey[1:]
 		bucket.SetValue = bucket.SetValue[1:]
 	}
 
 	if err := s.Put([]byte(key), bucket.Marshal()); err != nil {
-		return fmt.Errorf("failed to put updated bucket data: %w", err)
+		return nil, fmt.Errorf("failed to put updated bucket data: %w", err)
 	}
 
-	return nil
+	return removed, nil
 }
 
 func (s *Store) GetNodeFromBucket(bucketIndex int, nodeID []byte) ([]byte, error) {

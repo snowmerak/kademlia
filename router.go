@@ -136,9 +136,11 @@ func (r *Router) StoreNode(c *Contact) error {
 		return fmt.Errorf("invalid bucket index")
 	}
 
-	if err := r.store.AddNodeToBucket(idx, c.ID, data); err != nil {
+	removed, err := r.store.AddNodeToBucket(idx, c.ID, data)
+	if err != nil {
 		return fmt.Errorf("failed to store contact in store: %w", err)
 	}
+	_ = removed
 
 	return nil
 }
