@@ -2,13 +2,16 @@ package kademlia
 
 import (
 	"fmt"
+	"net"
 )
 
 type Config struct {
-	KeyExchanger KeyExchanger
-	Hasher       IDHasher
-	StorePath    string
-	KBucketCount int
+	KeyExchanger   KeyExchanger
+	Hasher         IDHasher
+	StorePath      string
+	KBucketCount   int
+	ListenAddrHost string
+	ListenAddrPort int
 }
 
 type Router struct {
@@ -16,6 +19,9 @@ type Router struct {
 	hasher       IDHasher
 	keyExchanger KeyExchanger
 	store        *Store
+	tcpListener  *net.TCPListener
+	kBucketCount int
+	listenAddr   *net.TCPAddr
 }
 
 func NewRouter(id []byte, config Config) (*Router, error) {
@@ -24,11 +30,24 @@ func NewRouter(id []byte, config Config) (*Router, error) {
 		return nil, fmt.Errorf("failed to create store: %w", err)
 	}
 
+	tcpAddr := &net.TCPAddr{
+		IP:   net.ParseIP(config.ListenAddrHost),
+		Port: config.ListenAddrPort,
+	}
+
+	tcpLis, err := net.ListenTCP("tcp", tcpAddr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start TCP listener: %w", err)
+	}
+
 	return &Router{
 		id:           id,
 		hasher:       config.Hasher,
 		keyExchanger: config.KeyExchanger,
 		store:        strg,
+		tcpListener:  tcpLis,
+		kBucketCount: config.KBucketCount,
+		listenAddr:   tcpAddr,
 	}, nil
 }
 
