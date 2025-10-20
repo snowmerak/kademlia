@@ -15,6 +15,7 @@ type Session struct {
 	conn         net.Conn
 	remoteID     []byte
 	remoteAddr   string
+	remotePublicKey []byte
 	encryptor    Encryptor
 	sharedSecret []byte
 	writeMu      sync.Mutex
@@ -135,13 +136,14 @@ func InitiateSession(
 	}
 
 	return &Session{
-		conn:         conn,
-		remoteID:     peerHandshake.NodeID,
-		remoteAddr:   conn.RemoteAddr().String(),
-		encryptor:    encryptor,
-		sharedSecret: sharedSecret,
-		lastActivity: time.Now(),
-		closed:       false,
+		conn:            conn,
+		remoteID:        peerHandshake.NodeID,
+		remoteAddr:      conn.RemoteAddr().String(),
+		remotePublicKey: peerHandshake.PublicKey,
+		encryptor:       encryptor,
+		sharedSecret:    sharedSecret,
+		lastActivity:    time.Now(),
+		closed:          false,
 	}, nil
 }
 
@@ -192,13 +194,14 @@ func AcceptSession(
 	}
 
 	return &Session{
-		conn:         conn,
-		remoteID:     peerHandshake.NodeID,
-		remoteAddr:   conn.RemoteAddr().String(),
-		encryptor:    encryptor,
-		sharedSecret: sharedSecret,
-		lastActivity: time.Now(),
-		closed:       false,
+		conn:            conn,
+		remoteID:        peerHandshake.NodeID,
+		remoteAddr:      conn.RemoteAddr().String(),
+		remotePublicKey: peerHandshake.PublicKey,
+		encryptor:       encryptor,
+		sharedSecret:    sharedSecret,
+		lastActivity:    time.Now(),
+		closed:          false,
 	}, nil
 }
 
@@ -267,6 +270,13 @@ func (s *Session) RemoteID() []byte {
 // RemoteAddr returns the peer's address
 func (s *Session) RemoteAddr() string {
 	return s.remoteAddr
+}
+
+// PublicKey returns the peer's public key
+func (s *Session) PublicKey() []byte {
+	key := make([]byte, len(s.remotePublicKey))
+	copy(key, s.remotePublicKey)
+	return key
 }
 
 // LastActivity returns the time of last activity
