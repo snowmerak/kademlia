@@ -1,10 +1,13 @@
 package kademlia
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net"
 	"strconv"
+
+	"github.com/cockroachdb/pebble"
 )
 
 type Config struct {
@@ -114,17 +117,17 @@ func (r *Router) Close() error {
 
 func (r *Router) Initialize(force bool) error {
 	id, err := r.store.GetNodeID()
-	if err != nil {
+	if !force && err != nil && !errors.Is(err, pebble.ErrNotFound) {
 		return fmt.Errorf("failed to get node ID from store: %w", err)
 	}
 
 	privKey, err := r.store.GetPrivateKey()
-	if err != nil {
+	if !force && err != nil && !errors.Is(err, pebble.ErrNotFound) {
 		return fmt.Errorf("failed to get private key from store: %w", err)
 	}
 
 	pubKey, err := r.store.GetPublicKey()
-	if err != nil {
+	if !force && err != nil && !errors.Is(err, pebble.ErrNotFound) {
 		return fmt.Errorf("failed to get public key from store: %w", err)
 	}
 
