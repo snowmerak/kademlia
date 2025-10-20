@@ -230,6 +230,7 @@ func (r *Router) FindNearbyNodes(targetID []byte, count int) ([]*Contact, error)
 		return nil, fmt.Errorf("invalid bucket index")
 	}
 
+	log.Printf("[Router] FindNearbyNodes: looking for %d nodes near target %x, starting at bucket %d", count, targetID, idx)
 	originIdx := idx
 
 	result := []*Contact{}
@@ -281,6 +282,7 @@ func (r *Router) FindNearbyNodes(targetID []byte, count int) ([]*Contact, error)
 		}
 	}
 
+	log.Printf("[Router] FindNearbyNodes: found %d nodes", len(result))
 	return result, nil
 }
 

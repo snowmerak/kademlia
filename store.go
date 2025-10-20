@@ -265,6 +265,10 @@ func (s *Store) GetAllNodesInBucket(bucketIndex int) ([][]byte, error) {
 	key := fmt.Sprintf("bucket:%d", bucketIndex)
 	bucketData, err := s.Get([]byte(key))
 	if err != nil {
+		// If bucket doesn't exist, return empty slice (not an error)
+		if errors.Is(err, pebble.ErrNotFound) {
+			return [][]byte{}, nil
+		}
 		return nil, fmt.Errorf("failed to get bucket data: %w", err)
 	}
 
