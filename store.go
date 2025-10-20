@@ -250,6 +250,24 @@ func (s *Store) GetNodeFromBucket(bucketIndex int, nodeID []byte) ([]byte, error
 	return nil, fmt.Errorf("node not found in bucket")
 }
 
+func (s *Store) GetAllNodesInBucket(bucketIndex int) ([][]byte, error) {
+	s.bucketLock.RLock()
+	defer s.bucketLock.RUnlock()
+
+	key := fmt.Sprintf("bucket:%d", bucketIndex)
+	bucketData, err := s.Get([]byte(key))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get bucket data: %w", err)
+	}
+
+	var bucket Bucket
+	if err := bucket.Unmarshal(bucketData); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal bucket data: %w", err)
+	}
+
+	return bucket.SetValue, nil
+}
+
 func (s *Store) RemoveNodeFromBucket(bucketIndex int, nodeID []byte) error {
 	s.bucketLock.Lock()
 	defer s.bucketLock.Unlock()
