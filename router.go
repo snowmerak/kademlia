@@ -90,7 +90,7 @@ func NewRouter(config Config) (*Router, error) {
 					log.Printf("[Router] Failed to parse remote address %s: %v", sess.RemoteAddr(), err)
 					return
 				}
-				u, err := strconv.ParseInt(p, 10, 16)
+				u, err := strconv.ParseInt(p, 10, 32)
 				if err != nil {
 					log.Printf("[Router] Failed to parse port %s: %v", p, err)
 					return
@@ -309,6 +309,11 @@ func (r *Router) DialNode(c *Contact) error {
 
 	// Start handling incoming RPC messages
 	go sess.HandleIncoming()
+
+	// Store the contact in routing table
+	if err := r.StoreNode(c); err != nil {
+		log.Printf("[Router] Failed to store node %x in routing table: %v", c.ID, err)
+	}
 
 	return nil
 }
