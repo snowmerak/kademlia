@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"log"
 	"os"
@@ -11,8 +12,38 @@ import (
 	"github.com/snowmerak/kademlia"
 )
 
+// Custom RPC type (must be > 2)
+const (
+	RPCTypeCustomEcho uint32 = 100
+)
+
+// createEchoHandler creates a custom ECHO handler
+func createEchoHandler() kademlia.RPCHandler {
+	return func(sess *kademlia.Session, payload []byte) ([]byte, error) {
+		log.Printf("[CustomHandler] ECHO request from %x: %s", sess.RemoteID(), string(payload))
+
+		// Echo back the same payload
+		response := make([]byte, 4+len(payload))
+		binary.BigEndian.PutUint32(response[:4], RPCTypeCustomEcho)
+		copy(response[4:], payload)
+
+		return response, nil
+	}
+}
+
 func main() {
 	log.SetFlags(log.Ltime | log.Lshortfile)
+
+	// Check for command-line argument
+	if len(os.Args) > 1 && os.Args[1] == "custom" {
+		customHandlerExample()
+		return
+	}
+	
+	basicExample()
+}
+
+func basicExample() {
 
 	// Create temporary directories for each node's database
 	tempDir, err := os.MkdirTemp("", "kademlia-example-*")
@@ -130,6 +161,62 @@ func main() {
 		log.Printf("✓ Node3 has Node1 in routing table: %x", contact.ID)
 	} else {
 		log.Printf("✗ Node3 doesn't have Node1 in routing table")
+	}
+
+	// Test Custom Handler (ECHO)
+	log.Println("\n=== Testing Custom ECHO Handler ===")
+	
+	// Register ECHO handler on Node1
+	if err := node1.RegisterHandler(RPCTypeCustomEcho, createEchoHandler()); err != nil {
+		log.Printf("✗ Failed to register custom handler: %v", err)
+	} else {
+		log.Println("✓ Custom ECHO handler registered on Node1")
+		
+		testMessage := []byte("Hello from Node2!")
+		log.Printf("Sending ECHO request: %s", string(testMessage))
+
+		echoDone := make(chan bool)
+		err = node2.SendCustomRPC(ctx, node1.ID(), RPCTypeCustomEcho, testMessage, func(data []byte, err error) {
+			if err != nil {
+				log.Printf("✗ ECHO failed: %v", err)
+				echoDone <- false
+				return
+			}
+
+			if len(data) < 4 {
+				log.Printf("✗ Invalid ECHO response: too short")
+				echoDone <- false
+				return
+			}
+
+			rpcType := binary.BigEndian.Uint32(data[:4])
+			payload := data[4:]
+
+			if rpcType == RPCTypeCustomEcho && string(payload) == string(testMessage) {
+				log.Printf("✓ ECHO response matches! Received: %s", string(payload))
+				echoDone <- true
+			} else {
+				log.Printf("✗ ECHO mismatch: expected '%s', got '%s'", string(testMessage), string(payload))
+				echoDone <- false
+			}
+		})
+
+		if err != nil {
+			log.Printf("✗ Failed to send ECHO: %v", err)
+		} else {
+			select {
+			case success := <-echoDone:
+				if !success {
+					log.Println("✗ ECHO test failed")
+				}
+			case <-time.After(2 * time.Second):
+				log.Println("✗ ECHO response timeout")
+			}
+		}
+		
+		// Unregister handler
+		node1.UnregisterHandler(RPCTypeCustomEcho)
+		log.Println("✓ Custom handler unregistered")
 	}
 
 	log.Println("\n=== Test Complete ===")
