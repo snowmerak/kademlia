@@ -133,14 +133,20 @@ func (r *Router) IterativeFindNode(ctx context.Context, targetID []byte, k int) 
 			go func(c *Contact) {
 				defer wg.Done()
 
-				nodes, err := r.SendFindNode(ctx, c.ID, targetID)
-				if err != nil {
-					log.Printf("[Lookup] FIND_NODE to %x failed: %v", c.ID, err)
-					return
-				}
+				// Use callback pattern for async response
+				err := r.SendFindNode(ctx, c.ID, targetID, func(nodes []*Contact, err error) {
+					if err != nil {
+						log.Printf("[Lookup] FIND_NODE to %x failed: %v", c.ID, err)
+						return
+					}
 
-				log.Printf("[Lookup] FIND_NODE to %x returned %d nodes", c.ID, len(nodes))
-				newNodesCh <- nodes
+					log.Printf("[Lookup] FIND_NODE to %x returned %d nodes", c.ID, len(nodes))
+					newNodesCh <- nodes
+				})
+				
+				if err != nil {
+					log.Printf("[Lookup] Failed to send FIND_NODE to %x: %v", c.ID, err)
+				}
 			}(contact)
 		}
 

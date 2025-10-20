@@ -9,6 +9,9 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"github.com/snowmerak/kademlia/rpc"
+	"google.golang.org/protobuf/proto"
 )
 
 // Session represents an encrypted connection with a peer node
@@ -26,6 +29,9 @@ type Session struct {
 	activityMu      sync.RWMutex
 	closed          bool
 	closeMu         sync.Mutex
+
+	// Response callbacks for async RPC
+	responseCallbacks *ConcurrentMap[string, func([]byte, error)]
 }
 
 // HandshakeMessage represents the initial key exchange message
@@ -138,15 +144,16 @@ func InitiateSession(
 	}
 
 	return &Session{
-		router:          router,
-		conn:            conn,
-		remoteID:        peerHandshake.NodeID,
-		remoteAddr:      conn.RemoteAddr().String(),
-		remotePublicKey: peerHandshake.PublicKey,
-		encryptor:       encryptor,
-		sharedSecret:    sharedSecret,
-		lastActivity:    time.Now(),
-		closed:          false,
+		router:            router,
+		conn:              conn,
+		remoteID:          peerHandshake.NodeID,
+		remoteAddr:        conn.RemoteAddr().String(),
+		remotePublicKey:   peerHandshake.PublicKey,
+		encryptor:         encryptor,
+		sharedSecret:      sharedSecret,
+		lastActivity:      time.Now(),
+		closed:            false,
+		responseCallbacks: NewConcurrentMap[string, func([]byte, error)](),
 	}, nil
 }
 
@@ -197,15 +204,16 @@ func AcceptSession(
 	}
 
 	return &Session{
-		router:          router,
-		conn:            conn,
-		remoteID:        peerHandshake.NodeID,
-		remoteAddr:      conn.RemoteAddr().String(),
-		remotePublicKey: peerHandshake.PublicKey,
-		encryptor:       encryptor,
-		sharedSecret:    sharedSecret,
-		lastActivity:    time.Now(),
-		closed:          false,
+		router:            router,
+		conn:              conn,
+		remoteID:          peerHandshake.NodeID,
+		remoteAddr:        conn.RemoteAddr().String(),
+		remotePublicKey:   peerHandshake.PublicKey,
+		encryptor:         encryptor,
+		sharedSecret:      sharedSecret,
+		lastActivity:      time.Now(),
+		closed:            false,
+		responseCallbacks: NewConcurrentMap[string, func([]byte, error)](),
 	}, nil
 }
 
@@ -336,6 +344,11 @@ func (s *Session) HandleIncoming() {
 		data, err := s.ReceiveMessage()
 		if err != nil {
 			// Connection closed or error - ReceiveMessage already called Close()
+			// Notify all pending callbacks with error
+			s.responseCallbacks.Range(func(msgID string, callback func([]byte, error)) bool {
+				callback(nil, fmt.Errorf("connection closed"))
+				return true
+			})
 			return
 		}
 
@@ -348,7 +361,19 @@ func (s *Session) HandleIncoming() {
 		rpcType := binary.BigEndian.Uint32(data[:4])
 		payload := data[4:]
 
-		// Route to handler
+		// Try to extract message ID to check if this is a response
+		messageID := s.extractMessageID(rpcType, payload)
+		if messageID != "" {
+			// Check if we have a callback waiting for this message
+			if callback, ok := s.responseCallbacks.Load(messageID); ok {
+				// This is a response - invoke callback and remove from map
+				s.responseCallbacks.Delete(messageID)
+				callback(data, nil)
+				continue
+			}
+		}
+
+		// This is a request - route to handler
 		response, err := s.router.HandleRPC(s, rpcType, payload)
 		if err != nil {
 			log.Printf("[Session] RPC error from %x: %v", s.RemoteID(), err)
@@ -363,6 +388,28 @@ func (s *Session) HandleIncoming() {
 			}
 		}
 	}
+}
+
+// extractMessageID extracts message ID from RPC payload based on type
+func (s *Session) extractMessageID(rpcType uint32, payload []byte) string {
+	switch rpcType {
+	case RPCTypePing:
+		var msg rpc.PingResponse
+		if err := proto.Unmarshal(payload, &msg); err == nil && msg.Header != nil {
+			return string(msg.Header.MessageId)
+		}
+	case RPCTypeFindNode:
+		var msg rpc.FindNodeResponse
+		if err := proto.Unmarshal(payload, &msg); err == nil && msg.Header != nil {
+			return string(msg.Header.MessageId)
+		}
+	}
+	return ""
+}
+
+// RegisterResponseCallback registers a callback for a specific message ID
+func (s *Session) RegisterResponseCallback(messageID string, callback func([]byte, error)) {
+	s.responseCallbacks.Store(messageID, callback)
 }
 
 // writeFrame writes a length-prefixed frame to the connection
