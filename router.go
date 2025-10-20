@@ -226,8 +226,33 @@ func (r *Router) StoreNode(c *Contact) error {
 
 func (r *Router) FindNearbyNodes(targetID []byte, count int) ([]*Contact, error) {
 	idx := r.hasher.GetBucketIndex(r.id, targetID)
+	
+	// If looking for ourselves (idx < 0), search all buckets
 	if idx < 0 {
-		return nil, fmt.Errorf("invalid bucket index")
+		log.Printf("[Router] FindNearbyNodes: target is self, searching all buckets for %d nodes", count)
+		result := []*Contact{}
+		maxIndex := r.hasher.MaxIDLength()
+		for bucketIdx := 0; bucketIdx < maxIndex && len(result) < count; bucketIdx++ {
+			contactsData, err := r.store.GetAllNodesInBucket(bucketIdx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get nodes from bucket: %w", err)
+			}
+
+			for _, data := range contactsData {
+				if len(result) >= count {
+					break
+				}
+
+				c := &Contact{}
+				if err := c.Unmarshal(data); err != nil {
+					return nil, fmt.Errorf("failed to unmarshal contact: %w", err)
+				}
+
+				result = append(result, c)
+			}
+		}
+		log.Printf("[Router] FindNearbyNodes: found %d nodes in all buckets", len(result))
+		return result, nil
 	}
 
 	log.Printf("[Router] FindNearbyNodes: looking for %d nodes near target %x, starting at bucket %d", count, targetID, idx)
@@ -313,7 +338,8 @@ func (r *Router) DialNode(c *Contact) error {
 	go sess.HandleIncoming()
 
 	// Store the contact in routing table
-	log.Printf("[Router] Storing node %x in routing table (Host: %s, Port: %d)", c.ID, c.Host, c.Port)
+	bucketIdx := r.hasher.GetBucketIndex(r.id, c.ID)
+	log.Printf("[Router] Storing node %x in routing table at bucket %d (Host: %s, Port: %d)", c.ID, bucketIdx, c.Host, c.Port)
 	if err := r.StoreNode(c); err != nil {
 		log.Printf("[Router] Failed to store node %x in routing table: %v", c.ID, err)
 	} else {

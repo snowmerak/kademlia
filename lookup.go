@@ -40,8 +40,14 @@ type contactWithDistance struct {
 // IterativeFindNode performs iterative node lookup to find k closest nodes to targetID
 func (r *Router) IterativeFindNode(ctx context.Context, targetID []byte, k int) ([]*Contact, error) {
 	// 1. Get initial candidates from local routing table
+	log.Printf("[Lookup] IterativeFindNode: searching for target %x with k=%d", targetID, k)
 	shortlist, err := r.FindNearbyNodes(targetID, k)
-	if err != nil || len(shortlist) == 0 {
+	if err != nil {
+		log.Printf("[Lookup] FindNearbyNodes returned error: %v", err)
+		return nil, fmt.Errorf("no initial nodes in routing table: %w", err)
+	}
+	if len(shortlist) == 0 {
+		log.Printf("[Lookup] FindNearbyNodes returned empty list")
 		return nil, fmt.Errorf("no initial nodes in routing table")
 	}
 
