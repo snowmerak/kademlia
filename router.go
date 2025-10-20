@@ -274,3 +274,34 @@ func (r *Router) FindNearbyNodes(targetID []byte, count int) ([]*Contact, error)
 
 	return result, nil
 }
+
+func (r *Router) DialNode(c *Contact) error {
+	addr := net.JoinHostPort(c.Host, strconv.Itoa(c.Port))
+	tcpAddr, err := net.ResolveTCPAddr("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("failed to resolve TCP address: %w", err)
+	}
+
+	conn, err := net.DialTCP("tcp", nil, tcpAddr)
+	if err != nil {
+		return fmt.Errorf("failed to dial TCP address: %w", err)
+	}
+
+	sess, err := InitiateSession(conn, r)
+	if err != nil {
+		conn.Close()
+		return fmt.Errorf("failed to initiate session: %w", err)
+	}
+
+	old, swapped := r.sessions.Swap(sess.RemoteID(), sess)
+	if swapped && old != nil {
+		old.Close()
+	}
+
+	return nil
+}
+
+func (r *Router) GetSession(peerID []byte) (*Session, bool) {
+	sess, ok := r.sessions.Load(peerID)
+	return sess, ok
+}
