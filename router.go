@@ -210,14 +210,11 @@ func (r *Router) PublicKey() ([]byte, error) {
 // EncapsulateSecret generates cipher text from peer's encapsulation key
 // Used by client to create cipher text to send to server
 func (r *Router) EncapsulateSecret(peerEncapsulationKey []byte) (cipherText []byte, sharedSecret []byte, err error) {
-	log.Printf("[Router.EncapsulateSecret] Encapsulating with peer encapsulation key: %x", peerEncapsulationKey)
-
 	cipherText, sharedSecret, err = r.keyExchanger.Encapsulate(peerEncapsulationKey)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to encapsulate: %w", err)
 	}
 
-	log.Printf("[Router.EncapsulateSecret] Generated cipher text: %x, shared secret: %x", cipherText, sharedSecret)
 	return cipherText, sharedSecret, nil
 }
 
