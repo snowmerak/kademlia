@@ -2,6 +2,7 @@ package kademlia
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"strconv"
 )
@@ -74,18 +75,21 @@ func NewRouter(id []byte, config Config) (*Router, error) {
 
 			go func() {
 				idx := r.hasher.GetBucketIndex(r.id, sess.RemoteID())
-				if idx < 0 {
-					return
-				}
+			if idx < 0 {
+				log.Printf("[Router] Invalid bucket index for node %x", sess.RemoteID())
+				return
+			}
 
-				h, p, err := net.SplitHostPort(sess.RemoteAddr())
-				if err != nil {
-					return
-				}
-				u, err := strconv.ParseInt(p, 10, 16)
-				if err != nil {
-					return
-				}
+			h, p, err := net.SplitHostPort(sess.RemoteAddr())
+			if err != nil {
+				log.Printf("[Router] Failed to parse remote address %s: %v", sess.RemoteAddr(), err)
+				return
+			}
+			u, err := strconv.ParseInt(p, 10, 16)
+			if err != nil {
+				log.Printf("[Router] Failed to parse port %s: %v", p, err)
+				return
+			}
 
 				c := &Contact{
 					ID:        sess.RemoteID(),
