@@ -102,6 +102,7 @@ func InitiateSession(
 	conn net.Conn,
 	router *Router,
 ) (*Session, error) {
+	log.Printf("[InitiateSession] Starting handshake with %s", conn.RemoteAddr())
 	localID := router.ID()
 	localPublicKey, err := router.PublicKey()
 	if err != nil {
@@ -115,6 +116,8 @@ func InitiateSession(
 		Timestamp: time.Now().Unix(),
 	}
 
+	log.Printf("[InitiateSession] Sending handshake: NodeID=%x, PublicKey=%x", handshake.NodeID, handshake.PublicKey)
+	
 	handshakeData := handshake.Marshal()
 	if err := writeFrame(conn, handshakeData); err != nil {
 		return nil, fmt.Errorf("failed to send handshake: %w", err)
@@ -131,11 +134,15 @@ func InitiateSession(
 		return nil, fmt.Errorf("failed to unmarshal peer handshake: %w", err)
 	}
 
+	log.Printf("[InitiateSession] Received peer handshake: NodeID=%x, PublicKey=%x", peerHandshake.NodeID, peerHandshake.PublicKey)
+
 	// Compute shared secret using Router's Handshake method
 	sharedSecret, err := router.Handshake(peerHandshake.PublicKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to compute shared secret: %w", err)
 	}
+
+	log.Printf("[InitiateSession] Computed shared secret: %x", sharedSecret)
 
 	// Create encryptor
 	encryptor, err := NewXChaCha20Poly1305(sharedSecret)
@@ -162,6 +169,8 @@ func AcceptSession(
 	conn net.Conn,
 	router *Router,
 ) (*Session, error) {
+	log.Printf("[AcceptSession] Starting handshake with %s", conn.RemoteAddr())
+	
 	// Receive peer's handshake message first
 	peerHandshakeData, err := readFrame(conn)
 	if err != nil {
@@ -172,6 +181,8 @@ func AcceptSession(
 	if err := peerHandshake.Unmarshal(peerHandshakeData); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal peer handshake: %w", err)
 	}
+	
+	log.Printf("[AcceptSession] Received peer handshake: NodeID=%x, PublicKey=%x", peerHandshake.NodeID, peerHandshake.PublicKey)
 
 	localID := router.ID()
 	localPublicKey, err := router.PublicKey()
@@ -186,6 +197,8 @@ func AcceptSession(
 		Timestamp: time.Now().Unix(),
 	}
 
+	log.Printf("[AcceptSession] Sending handshake: NodeID=%x, PublicKey=%x", handshake.NodeID, handshake.PublicKey)
+
 	handshakeData := handshake.Marshal()
 	if err := writeFrame(conn, handshakeData); err != nil {
 		return nil, fmt.Errorf("failed to send handshake: %w", err)
@@ -196,6 +209,8 @@ func AcceptSession(
 	if err != nil {
 		return nil, fmt.Errorf("failed to compute shared secret: %w", err)
 	}
+
+	log.Printf("[AcceptSession] Computed shared secret: %x", sharedSecret)
 
 	// Create encryptor
 	encryptor, err := NewXChaCha20Poly1305(sharedSecret)
@@ -343,12 +358,16 @@ func (s *Session) HandleIncoming() {
 	for {
 		data, err := s.ReceiveMessage()
 		if err != nil {
+			log.Printf("[Session] HandleIncoming error from %x: %v", s.RemoteID(), err)
 			// Connection closed or error - ReceiveMessage already called Close()
 			// Notify all pending callbacks with error
+			callbackCount := 0
 			s.responseCallbacks.Range(func(msgID string, callback func([]byte, error)) bool {
+				callbackCount++
 				callback(nil, fmt.Errorf("connection closed"))
 				return true
 			})
+			log.Printf("[Session] Notified %d pending callbacks about connection closed", callbackCount)
 			return
 		}
 
@@ -363,6 +382,7 @@ func (s *Session) HandleIncoming() {
 
 		// Try to extract message ID to check if this is a response
 		messageID := s.extractMessageID(rpcType, payload)
+		log.Printf("[Session] Received message type=%d, msgID=%s from %x", rpcType, messageID, s.RemoteID())
 		if messageID != "" {
 			// Check if we have a callback waiting for this message
 			if callback, ok := s.responseCallbacks.Load(messageID); ok {

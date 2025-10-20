@@ -131,10 +131,10 @@ func (r *Router) IterativeFindNode(ctx context.Context, targetID []byte, k int) 
 		for _, contact := range toQuery {
 			wg.Add(1)
 			go func(c *Contact) {
-				defer wg.Done()
-
 				// Use callback pattern for async response
 				err := r.SendFindNode(ctx, c.ID, targetID, func(nodes []*Contact, err error) {
+					defer wg.Done() // Call Done when callback is executed
+					
 					if err != nil {
 						log.Printf("[Lookup] FIND_NODE to %x failed: %v", c.ID, err)
 						return
@@ -145,6 +145,7 @@ func (r *Router) IterativeFindNode(ctx context.Context, targetID []byte, k int) 
 				})
 				
 				if err != nil {
+					wg.Done() // If sending failed, call Done immediately
 					log.Printf("[Lookup] Failed to send FIND_NODE to %x: %v", c.ID, err)
 				}
 			}(contact)

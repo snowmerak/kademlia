@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"strconv"
+	"time"
 
 	"github.com/cockroachdb/pebble"
 )
@@ -176,16 +177,19 @@ func (r *Router) PublicKey() ([]byte, error) {
 }
 
 func (r *Router) Handshake(peerPublicKey []byte) ([]byte, error) {
+	log.Printf("[Router.Handshake] Computing shared secret for peer public key: %x", peerPublicKey)
 	privKey, err := r.store.GetPrivateKey()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get private key from store: %w", err)
 	}
 
+	log.Printf("[Router.Handshake] Using private key: %x", privKey)
 	sharedSecret, err := r.keyExchanger.ComputeSharedSecret(privKey, peerPublicKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to compute shared secret: %w", err)
 	}
-
+	
+	log.Printf("[Router.Handshake] Computed shared secret: %x", sharedSecret)
 	return sharedSecret, nil
 }
 
@@ -336,6 +340,9 @@ func (r *Router) DialNode(c *Contact) error {
 
 	// Start handling incoming RPC messages
 	go sess.HandleIncoming()
+
+	// Small delay to ensure HandleIncoming is ready
+	time.Sleep(10 * time.Millisecond)
 
 	// Store the contact in routing table
 	bucketIdx := r.hasher.GetBucketIndex(r.id, c.ID)
