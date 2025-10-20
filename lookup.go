@@ -220,14 +220,7 @@ func (r *Router) Bootstrap(ctx context.Context, bootstrapNodes []*Contact) error
 
 	log.Printf("[Bootstrap] Starting with %d bootstrap nodes", len(bootstrapNodes))
 
-	// 1. Store bootstrap nodes in routing table
-	for _, node := range bootstrapNodes {
-		if err := r.StoreNode(node); err != nil {
-			log.Printf("[Bootstrap] Failed to store node %x: %v", node.ID, err)
-		}
-	}
-
-	// 2. Connect to bootstrap nodes
+	// 1. Connect to bootstrap nodes (they will be automatically stored in routing table)
 	for _, node := range bootstrapNodes {
 		if err := r.DialNode(node); err != nil {
 			log.Printf("[Bootstrap] Failed to dial node %x: %v", node.ID, err)

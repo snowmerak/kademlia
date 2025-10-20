@@ -311,8 +311,11 @@ func (r *Router) DialNode(c *Contact) error {
 	go sess.HandleIncoming()
 
 	// Store the contact in routing table
+	log.Printf("[Router] Storing node %x in routing table (Host: %s, Port: %d)", c.ID, c.Host, c.Port)
 	if err := r.StoreNode(c); err != nil {
 		log.Printf("[Router] Failed to store node %x in routing table: %v", c.ID, err)
+	} else {
+		log.Printf("[Router] Successfully stored node %x in routing table", c.ID)
 	}
 
 	return nil
