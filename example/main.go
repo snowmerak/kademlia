@@ -86,9 +86,8 @@ func basicExample() {
 	ctx := context.Background()
 
 	node1Contact := &kademlia.Contact{
-		ID:   node1.ID(),
-		Host: "127.0.0.1",
-		Port: 9001,
+		ID:    node1.ID(),
+		Addrs: []string{"127.0.0.1:9001"},
 	}
 
 	if err := node2.Bootstrap(ctx, []*kademlia.Contact{node1Contact}); err != nil {
