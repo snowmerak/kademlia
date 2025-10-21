@@ -102,8 +102,8 @@ Provides post-quantum cryptographic key encapsulation:
 
 #### Hashing (`hashed_id.go`)
 Node ID generation and distance calculation:
-- `StandardIDHasher`: SHA-256 based
-- `ExtendedIDHasher`: BLAKE3 based (recommended)
+- `LegacyIDHasher`: SHA-1 based (160-bit node IDs)
+- `ExtendedIDHasher`: BLAKE3 based (256-bit node IDs, recommended)
 - XOR distance metric for Kademlia
 
 #### Storage (`store.go`)
@@ -295,7 +295,7 @@ GetAllContacts() []*Contact
 ```go
 type Config struct {
     KeyExchanger   KeyExchanger  // MLKEMKeyExchanger or custom
-    Hasher         Hasher        // StandardIDHasher or ExtendedIDHasher
+    Hasher         IDHasher      // LegacyIDHasher or ExtendedIDHasher
     StorePath      string        // Path for Pebble database
     KBucketCount   int           // Number of k-buckets (typically 8)
     ListenAddrHost string        // Listen address
@@ -309,9 +309,9 @@ type Config struct {
 - Implement `KeyExchanger` interface for custom algorithms
 
 ### Hashing Implementations
-- `LegacyIDHasher`: SHA-1 based node IDs
-- `ExtendedIDHasher`: BLAKE3 based node IDs (faster, recommended)
-- Implement `Hasher` interface for custom hash functions
+- `LegacyIDHasher`: SHA-1 based node IDs (160-bit, 160 buckets)
+- `ExtendedIDHasher`: BLAKE3 based node IDs (256-bit, 256 buckets, faster, recommended)
+- Implement `IDHasher` interface for custom hash functions
 
 ## Examples
 
