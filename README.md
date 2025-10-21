@@ -240,17 +240,26 @@ func main() {
 
 #### Network Operations
 ```go
+// Initialize router (must call before use)
+Initialize(force bool) error
+
+// Close router and storage
+Close() error
+
 // Bootstrap to network
 Bootstrap(ctx context.Context, contacts []*Contact) error
 
 // Perform iterative node lookup
 IterativeFindNode(ctx context.Context, target []byte, k int) ([]*Contact, error)
 
+// Lookup single node
+LookupNode(ctx context.Context, targetID []byte) (*Contact, error)
+
 // Send PING to node
-SendPing(ctx context.Context, targetID []byte, callback func([]byte, error)) error
+SendPing(ctx context.Context, nodeID []byte, callback func([]byte, error)) error
 
 // Send FIND_NODE request
-SendFindNode(ctx context.Context, targetID []byte, target []byte, callback func([]byte, error)) error
+SendFindNode(ctx context.Context, nodeID []byte, targetID []byte, callback func([]*Contact, error)) error
 ```
 
 #### Custom RPC
@@ -271,22 +280,40 @@ SendCustomRPC(ctx context.Context, targetID []byte, rpcType uint32, payload []by
 #### Session Management
 ```go
 // Get active session
-GetSession(nodeID []byte) (*Session, bool)
+GetSession(peerID []byte) (*Session, bool)
 
-// Connect to node
-Connect(ctx context.Context, contact *Contact) (*Session, error)
+// Get or create session (dials if needed)
+GetOrCreateSession(nodeID []byte) (*Session, error)
+
+// Dial and connect to node
+DialNode(c *Contact) error
 ```
 
 #### Routing Table
 ```go
+// Store contact in routing table
+StoreNode(c *Contact) error
+
 // Find node in routing table
-FindNode(nodeID []byte) (*Contact, error)
+FindNode(targetID []byte) (*Contact, error)
 
 // Find nearby nodes
-FindNearbyNodes(target []byte, k int) ([]*Contact, error)
+FindNearbyNodes(targetID []byte, count int) ([]*Contact, error)
+```
 
-// Get all contacts
-GetAllContacts() []*Contact
+#### Node Information
+```go
+// Get node's ID
+ID() []byte
+
+// Get node's public key
+PublicKey() ([]byte, error)
+
+// Generate cipher text for key exchange
+EncapsulateSecret(peerEncapsulationKey []byte) (cipherText []byte, sharedSecret []byte, err error)
+
+// Derive shared secret from cipher text
+DecapsulateSecret(cipherText []byte) ([]byte, error)
 ```
 
 ## Configuration
