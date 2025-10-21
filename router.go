@@ -13,6 +13,10 @@ import (
 	"github.com/cockroachdb/pebble"
 )
 
+const (
+	DefaultKBucketCount = 20
+)
+
 type Config struct {
 	KeyExchanger   KeyExchanger
 	Hasher         IDHasher
@@ -244,7 +248,7 @@ func (r *Router) FindNode(targetID []byte) (*Contact, error) {
 		return nil, fmt.Errorf("failed to get bucket from store: %w", err)
 	}
 
-	if contacts.Count == 0 {
+	if len(contacts.Contacts) == 0 {
 		return nil, fmt.Errorf("no contacts in bucket")
 	}
 
@@ -274,7 +278,6 @@ func (r *Router) StoreNode(c *Contact) error {
 	if contacts == nil {
 		contacts = &Bucket{
 			Index:    int64(idx),
-			Count:    0,
 			Contacts: []*Contact{},
 		}
 	}
@@ -282,7 +285,6 @@ func (r *Router) StoreNode(c *Contact) error {
 	switch {
 	case len(contacts.Contacts) < r.kBucketCount:
 		contacts.Contacts = append(contacts.Contacts, c)
-		contacts.Count++
 	default:
 		func() {
 			first := contacts.Contacts[0]
@@ -305,6 +307,10 @@ func (r *Router) StoreNode(c *Contact) error {
 				return
 			}
 		}()
+	}
+
+	if err := r.store.SaveBucket(contacts); err != nil {
+		return fmt.Errorf("failed to save bucket to store: %w", err)
 	}
 
 	return nil

@@ -3,6 +3,7 @@ package kademlia
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -102,7 +103,6 @@ func (s *Store) GetNodeID() ([]byte, error) {
 
 type Bucket struct {
 	Index    int64
-	Count    int64
 	Contacts []*Contact
 }
 
@@ -112,7 +112,7 @@ func (b *Bucket) Marshal() []byte {
 
 	binary.BigEndian.PutUint64(temp, uint64(b.Index))
 	buffer.Write(temp)
-	binary.BigEndian.PutUint64(temp, uint64(b.Count))
+	binary.BigEndian.PutUint64(temp, uint64(len(b.Contacts)))
 	buffer.Write(temp)
 
 	count := int64(len(b.Contacts))
@@ -141,7 +141,6 @@ func (b *Bucket) Unmarshal(data []byte) error {
 	if _, err := buffer.Read(temp); err != nil {
 		return fmt.Errorf("failed to read bucket count: %w", err)
 	}
-	b.Count = int64(binary.BigEndian.Uint64(temp))
 
 	if _, err := buffer.Read(temp); err != nil {
 		return fmt.Errorf("failed to read bucket entry count: %w", err)
@@ -182,7 +181,7 @@ func (s *Store) LockBucket(index int64) func() {
 func (s *Store) GetBucket(index int64) (*Bucket, error) {
 	data, err := s.Get([]byte(fmt.Sprintf("bucket:%d", index)))
 	if err != nil {
-		if err == pebble.ErrNotFound {
+		if errors.Is(err, pebble.ErrNotFound) {
 			return &Bucket{Index: index, Contacts: []*Contact{}}, nil
 		}
 		return nil, fmt.Errorf("failed to get bucket from store: %w", err)
