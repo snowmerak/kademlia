@@ -14,10 +14,9 @@ message RPCHeader {
 
 // Contact information for a node
 message Contact {
-  bytes id = 1;           // Kademlia node ID
-  bytes public_key = 2;   // Node's public key
-  string host = 3;        // IP address or hostname
-  int32 port = 4;         // UDP/TCP port
+  bytes id = 1;              // Kademlia node ID
+  bytes public_key = 2;      // Node's public key
+  repeated string addrs = 3; // Network addresses (e.g., multiaddr format)
 }
 
 // ============================================================================

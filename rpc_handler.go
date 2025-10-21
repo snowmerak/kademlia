@@ -108,8 +108,7 @@ func (r *Router) handleFindNode(sess *Session, payload []byte) ([]byte, error) {
 		pbContacts[i] = &rpc.Contact{
 			Id:        c.ID,
 			PublicKey: c.PublicKey,
-			Host:      c.Host,
-			Port:      int32(c.Port),
+			Addrs:     c.Addrs,
 		}
 	}
 

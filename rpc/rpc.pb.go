@@ -95,8 +95,7 @@ type Contact struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`                                // Kademlia node ID
 	PublicKey     []byte                 `protobuf:"bytes,2,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"` // Node's public key
-	Host          string                 `protobuf:"bytes,3,opt,name=host,proto3" json:"host,omitempty"`                            // IP address or hostname
-	Port          int32                  `protobuf:"varint,4,opt,name=port,proto3" json:"port,omitempty"`                           // UDP/TCP port
+	Addrs         []string               `protobuf:"bytes,3,rep,name=addrs,proto3" json:"addrs,omitempty"`                          // Network addresses (e.g., multiaddr format)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -145,18 +144,11 @@ func (x *Contact) GetPublicKey() []byte {
 	return nil
 }
 
-func (x *Contact) GetHost() string {
+func (x *Contact) GetAddrs() []string {
 	if x != nil {
-		return x.Host
+		return x.Addrs
 	}
-	return ""
-}
-
-func (x *Contact) GetPort() int32 {
-	if x != nil {
-		return x.Port
-	}
-	return 0
+	return nil
 }
 
 type PingRequest struct {
@@ -378,13 +370,12 @@ const file_rpc_rpc_proto_rawDesc = "" +
 	"\tsender_id\x18\x02 \x01(\fR\bsenderId\x12\x1f\n" +
 	"\vsender_addr\x18\x03 \x01(\tR\n" +
 	"senderAddr\x12\x1c\n" +
-	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\"`\n" +
+	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\"N\n" +
 	"\aContact\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x1d\n" +
 	"\n" +
-	"public_key\x18\x02 \x01(\fR\tpublicKey\x12\x12\n" +
-	"\x04host\x18\x03 \x01(\tR\x04host\x12\x12\n" +
-	"\x04port\x18\x04 \x01(\x05R\x04port\"Y\n" +
+	"public_key\x18\x02 \x01(\fR\tpublicKey\x12\x14\n" +
+	"\x05addrs\x18\x03 \x03(\tR\x05addrs\"Y\n" +
 	"\vPingRequest\x12+\n" +
 	"\x06header\x18\x01 \x01(\v2\x13.kademlia.RPCHeaderR\x06header\x12\x1d\n" +
 	"\n" +

@@ -127,8 +127,7 @@ func (r *Router) SendFindNode(ctx context.Context, nodeID []byte, targetID []byt
 				contacts[i] = &Contact{
 					ID:        pbContact.Id,
 					PublicKey: pbContact.PublicKey,
-					Host:      pbContact.Host,
-					Port:      int(pbContact.Port),
+					Addrs:     pbContact.Addrs,
 				}
 			}
 

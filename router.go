@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"strconv"
 	"time"
 
 	"github.com/cockroachdb/pebble"
@@ -94,20 +93,20 @@ func NewRouter(config Config) (*Router, error) {
 			go sess.HandleIncoming()
 
 			go func() {
-				h, _, err := net.SplitHostPort(sess.RemoteAddr())
-				if err != nil {
-					log.Printf("[Router] Failed to parse remote address %s: %v", sess.RemoteAddr(), err)
-					return
-				}
+				// Build address from remote connection info
+				remoteAddr := sess.RemoteAddr()
+				listenPort := sess.RemoteListenPort()
+
+				// Construct address string (can be enhanced to support multiaddr format)
+				addr := fmt.Sprintf("%s:%d", remoteAddr, listenPort)
 
 				c := &Contact{
 					ID:        sess.RemoteID(),
 					PublicKey: sess.PublicKey(),
-					Host:      h,
-					Port:      sess.RemoteListenPort(),
+					Addrs:     []string{addr},
 				}
 
-				log.Printf("[Router] Storing node %x in routing table (Host: %s, Port: %d)", c.ID, c.Host, c.Port)
+				log.Printf("[Router] Storing node %x in routing table (Addrs: %v)", c.ID, c.Addrs)
 				if err := r.StoreNode(c); err != nil {
 					log.Printf("[Router] Failed to store node %x in routing table: %v", c.ID, err)
 				} else {
@@ -288,7 +287,8 @@ func (r *Router) StoreNode(c *Contact) error {
 	default:
 		func() {
 			first := contacts.Contacts[0]
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 
 			shifted := false
@@ -389,44 +389,68 @@ func (r *Router) FindNearbyNodes(targetID []byte, count int) ([]*Contact, error)
 }
 
 func (r *Router) DialNode(c *Contact) error {
-	addr := net.JoinHostPort(c.Host, strconv.Itoa(c.Port))
-	tcpAddr, err := net.ResolveTCPAddr("tcp", addr)
-	if err != nil {
-		return fmt.Errorf("failed to resolve TCP address: %w", err)
+	if len(c.Addrs) == 0 {
+		return fmt.Errorf("no addresses available for contact %x", c.ID)
 	}
 
-	conn, err := net.DialTCP("tcp", nil, tcpAddr)
-	if err != nil {
-		return fmt.Errorf("failed to dial TCP address: %w", err)
+	// Try each address until one succeeds
+	var lastErr error
+	for i, addr := range c.Addrs {
+		log.Printf("[Router] Attempting to dial node %x at address %s (attempt %d/%d)", c.ID, addr, i+1, len(c.Addrs))
+
+		tcpAddr, err := net.ResolveTCPAddr("tcp", addr)
+		if err != nil {
+			log.Printf("[Router] Failed to resolve TCP address %s: %v", addr, err)
+			lastErr = fmt.Errorf("failed to resolve TCP address %s: %w", addr, err)
+			continue
+		}
+
+		conn, err := net.DialTCP("tcp", nil, tcpAddr)
+		if err != nil {
+			log.Printf("[Router] Failed to dial TCP address %s: %v", addr, err)
+			lastErr = fmt.Errorf("failed to dial TCP address %s: %w", addr, err)
+			continue
+		}
+
+		sess, err := InitiateSession(conn, r)
+		if err != nil {
+			conn.Close()
+			log.Printf("[Router] Failed to initiate session with %s: %v", addr, err)
+			lastErr = fmt.Errorf("failed to initiate session: %w", err)
+			continue
+		}
+
+		// Successfully connected
+		log.Printf("[Router] Successfully connected to node %x at address %s", c.ID, addr)
+
+		old, swapped := r.sessions.Swap(string(sess.RemoteID()), sess)
+		if swapped && old != nil {
+			old.Close()
+		}
+
+		// Start handling incoming RPC messages
+		go sess.HandleIncoming()
+
+		// Small delay to ensure HandleIncoming is ready
+		time.Sleep(10 * time.Millisecond)
+
+		// Store the contact in routing table
+		bucketIdx := r.hasher.GetBucketIndex(r.id, c.ID)
+		log.Printf("[Router] Storing node %x in routing table at bucket %d (Addrs: %v)", c.ID, bucketIdx, c.Addrs)
+		if err := r.StoreNode(c); err != nil {
+			log.Printf("[Router] Failed to store node %x in routing table: %v", c.ID, err)
+		} else {
+			log.Printf("[Router] Successfully stored node %x in routing table", c.ID)
+		}
+
+		return nil
 	}
 
-	sess, err := InitiateSession(conn, r)
-	if err != nil {
-		conn.Close()
-		return fmt.Errorf("failed to initiate session: %w", err)
+	// All addresses failed
+	if lastErr != nil {
+		return fmt.Errorf("failed to connect to node %x after trying %d address(es): %w", c.ID, len(c.Addrs), lastErr)
 	}
-
-	old, swapped := r.sessions.Swap(string(sess.RemoteID()), sess)
-	if swapped && old != nil {
-		old.Close()
-	}
-
-	// Start handling incoming RPC messages
-	go sess.HandleIncoming()
-
-	// Small delay to ensure HandleIncoming is ready
-	time.Sleep(10 * time.Millisecond)
-
-	// Store the contact in routing table
-	bucketIdx := r.hasher.GetBucketIndex(r.id, c.ID)
-	log.Printf("[Router] Storing node %x in routing table at bucket %d (Host: %s, Port: %d)", c.ID, bucketIdx, c.Host, c.Port)
-	if err := r.StoreNode(c); err != nil {
-		log.Printf("[Router] Failed to store node %x in routing table: %v", c.ID, err)
-	} else {
-		log.Printf("[Router] Successfully stored node %x in routing table", c.ID)
-	}
-
-	return nil
+	return fmt.Errorf("failed to connect to node %x: no addresses available", c.ID)
 }
 
 func (r *Router) GetSession(peerID []byte) (*Session, bool) {
