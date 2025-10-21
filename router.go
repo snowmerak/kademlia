@@ -1,6 +1,8 @@
 package kademlia
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -88,12 +90,6 @@ func NewRouter(config Config) (*Router, error) {
 			go sess.HandleIncoming()
 
 			go func() {
-				idx := r.hasher.GetBucketIndex(r.id, sess.RemoteID())
-				if idx < 0 {
-					log.Printf("[Router] Invalid bucket index for node %x", sess.RemoteID())
-					return
-				}
-
 				h, _, err := net.SplitHostPort(sess.RemoteAddr())
 				if err != nil {
 					log.Printf("[Router] Failed to parse remote address %s: %v", sess.RemoteAddr(), err)
@@ -107,9 +103,12 @@ func NewRouter(config Config) (*Router, error) {
 					Port:      sess.RemoteListenPort(),
 				}
 
-				log.Printf("[Router] Storing node %x in routing table at bucket %d (Host: %s, Port: %d)", c.ID, idx, c.Host, c.Port)
-				r.store.AddNodeToBucket(idx, sess.RemoteID(), c.Marshal())
-				log.Printf("[Router] Successfully stored node %x in routing table", c.ID)
+				log.Printf("[Router] Storing node %x in routing table (Host: %s, Port: %d)", c.ID, c.Host, c.Port)
+				if err := r.StoreNode(c); err != nil {
+					log.Printf("[Router] Failed to store node %x in routing table: %v", c.ID, err)
+				} else {
+					log.Printf("[Router] Successfully stored node %x in routing table", c.ID)
+				}
 			}()
 		}
 	}()
@@ -240,31 +239,73 @@ func (r *Router) FindNode(targetID []byte) (*Contact, error) {
 		return nil, fmt.Errorf("invalid bucket index")
 	}
 
-	data, err := r.store.GetNodeFromBucket(idx, targetID)
+	contacts, err := r.store.GetBucket(int64(idx))
 	if err != nil {
-		return nil, fmt.Errorf("failed to find node in store: %w", err)
+		return nil, fmt.Errorf("failed to get bucket from store: %w", err)
 	}
 
-	c := &Contact{}
-	if err := c.Unmarshal(data); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal contact: %w", err)
+	if contacts.Count == 0 {
+		return nil, fmt.Errorf("no contacts in bucket")
 	}
 
-	return c, nil
+	for _, data := range contacts.Contacts {
+		if bytes.Equal(data.ID, targetID) {
+			return data, nil
+		}
+	}
+
+	return nil, fmt.Errorf("node not found in bucket")
 }
 
 func (r *Router) StoreNode(c *Contact) error {
-	data := c.Marshal()
 	idx := r.hasher.GetBucketIndex(r.id, c.ID)
 	if idx < 0 {
 		return fmt.Errorf("invalid bucket index")
 	}
 
-	removed, err := r.store.AddNodeToBucket(idx, c.ID, data)
-	if err != nil {
-		return fmt.Errorf("failed to store contact in store: %w", err)
+	unlock := r.store.LockBucket(int64(idx))
+	defer unlock()
+
+	contacts, err := r.store.GetBucket(int64(idx))
+	if err != nil && !errors.Is(err, pebble.ErrNotFound) {
+		return fmt.Errorf("failed to get bucket from store: %w", err)
 	}
-	_ = removed
+
+	if contacts == nil {
+		contacts = &Bucket{
+			Index:    int64(idx),
+			Count:    0,
+			Contacts: []*Contact{},
+		}
+	}
+
+	switch {
+	case len(contacts.Contacts) < r.kBucketCount:
+		contacts.Contacts = append(contacts.Contacts, c)
+		contacts.Count++
+	default:
+		func() {
+			first := contacts.Contacts[0]
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+
+			shifted := false
+			if err := r.SendPing(ctx, first.ID, func(b []byte, err error) {
+				if err != nil {
+					contacts.Contacts = append(contacts.Contacts[1:], c)
+					shifted = true
+					log.Printf("[Router] Bucket full, evicted unresponsive node %x, added node %x", first.ID, c.ID)
+					return
+				}
+			}); err != nil {
+				if !shifted {
+					contacts.Contacts = append(contacts.Contacts[1:], c)
+					log.Printf("[Router] Bucket full, evicted unresponsive node %x due to error, added node %x", first.ID, c.ID)
+				}
+				return
+			}
+		}()
+	}
 
 	return nil
 }
@@ -278,22 +319,17 @@ func (r *Router) FindNearbyNodes(targetID []byte, count int) ([]*Contact, error)
 		result := []*Contact{}
 		maxIndex := r.hasher.MaxIDLength()
 		for bucketIdx := 0; bucketIdx < maxIndex && len(result) < count; bucketIdx++ {
-			contactsData, err := r.store.GetAllNodesInBucket(bucketIdx)
+			contacts, err := r.store.GetBucket(int64(bucketIdx))
 			if err != nil {
-				return nil, fmt.Errorf("failed to get nodes from bucket: %w", err)
+				return nil, fmt.Errorf("failed to get bucket from store: %w", err)
 			}
 
-			for _, data := range contactsData {
+			for _, data := range contacts.Contacts {
 				if len(result) >= count {
 					break
 				}
 
-				c := &Contact{}
-				if err := c.Unmarshal(data); err != nil {
-					return nil, fmt.Errorf("failed to unmarshal contact: %w", err)
-				}
-
-				result = append(result, c)
+				result = append(result, data)
 			}
 		}
 		log.Printf("[Router] FindNearbyNodes: found %d nodes in all buckets", len(result))
@@ -305,22 +341,17 @@ func (r *Router) FindNearbyNodes(targetID []byte, count int) ([]*Contact, error)
 
 	result := []*Contact{}
 	for idx >= 0 && len(result) < count {
-		contactsData, err := r.store.GetAllNodesInBucket(idx)
+		contacts, err := r.store.GetBucket(int64(idx))
 		if err != nil {
-			return nil, fmt.Errorf("failed to get nodes from bucket: %w", err)
+			return nil, fmt.Errorf("failed to get bucket from store: %w", err)
 		}
 
-		for _, data := range contactsData {
+		for _, data := range contacts.Contacts {
 			if len(result) >= count {
 				break
 			}
 
-			c := &Contact{}
-			if err := c.Unmarshal(data); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal contact: %w", err)
-			}
-
-			result = append(result, c)
+			result = append(result, data)
 		}
 
 		idx--
@@ -330,22 +361,17 @@ func (r *Router) FindNearbyNodes(targetID []byte, count int) ([]*Contact, error)
 		idx = originIdx + 1
 		maxIndex := r.hasher.MaxIDLength()
 		for len(result) < count && idx < maxIndex {
-			contactsData, err := r.store.GetAllNodesInBucket(idx)
+			contacts, err := r.store.GetBucket(int64(idx))
 			if err != nil {
-				return nil, fmt.Errorf("failed to get nodes from bucket: %w", err)
+				return nil, fmt.Errorf("failed to get bucket from store: %w", err)
 			}
 
-			for _, data := range contactsData {
+			for _, data := range contacts.Contacts {
 				if len(result) >= count {
 					break
 				}
 
-				c := &Contact{}
-				if err := c.Unmarshal(data); err != nil {
-					return nil, fmt.Errorf("failed to unmarshal contact: %w", err)
-				}
-
-				result = append(result, c)
+				result = append(result, data)
 			}
 
 			idx++

@@ -3,7 +3,6 @@ package kademlia
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"sync"
 
@@ -12,7 +11,7 @@ import (
 
 type Store struct {
 	store        *pebble.DB
-	bucketLock   *sync.RWMutex
+	bucketLock   *ConcurrentMap[int64, *sync.RWMutex]
 	kBucketCount int
 }
 
@@ -24,7 +23,7 @@ func NewStore(dbPath string, kBucketCount int) (*Store, error) {
 
 	return &Store{
 		store:        db,
-		bucketLock:   &sync.RWMutex{},
+		bucketLock:   NewConcurrentMap[int64, *sync.RWMutex](),
 		kBucketCount: kBucketCount,
 	}, nil
 }
@@ -104,8 +103,7 @@ func (s *Store) GetNodeID() ([]byte, error) {
 type Bucket struct {
 	Index    int64
 	Count    int64
-	SetKey   [][]byte
-	SetValue [][]byte
+	Contacts []*Contact
 }
 
 func (b *Bucket) Marshal() []byte {
@@ -117,20 +115,15 @@ func (b *Bucket) Marshal() []byte {
 	binary.BigEndian.PutUint64(temp, uint64(b.Count))
 	buffer.Write(temp)
 
-	count := min(len(b.SetKey), len(b.SetValue))
+	count := int64(len(b.Contacts))
 	binary.BigEndian.PutUint64(temp, uint64(count))
 	buffer.Write(temp)
 
-	for i := 0; i < count; i++ {
-		keyLen := uint64(len(b.SetKey[i]))
-		binary.BigEndian.PutUint64(temp, keyLen)
+	for _, contact := range b.Contacts {
+		contactData := contact.Marshal()
+		binary.BigEndian.PutUint64(temp, uint64(len(contactData)))
 		buffer.Write(temp)
-		buffer.Write(b.SetKey[i])
-
-		valueLen := uint64(len(b.SetValue[i]))
-		binary.BigEndian.PutUint64(temp, valueLen)
-		buffer.Write(temp)
-		buffer.Write(b.SetValue[i])
+		buffer.Write(contactData)
 	}
 
 	return buffer.Bytes()
@@ -155,157 +148,58 @@ func (b *Bucket) Unmarshal(data []byte) error {
 	}
 	entryCount := int(binary.BigEndian.Uint64(temp))
 
-	b.SetKey = make([][]byte, entryCount)
-	b.SetValue = make([][]byte, entryCount)
-
 	for i := 0; i < entryCount; i++ {
 		if _, err := buffer.Read(temp); err != nil {
-			return fmt.Errorf("failed to read key length: %w", err)
+			return fmt.Errorf("failed to read contact length: %w", err)
 		}
-		keyLen := int(binary.BigEndian.Uint64(temp))
-		b.SetKey[i] = make([]byte, keyLen)
-		if _, err := buffer.Read(b.SetKey[i]); err != nil {
-			return fmt.Errorf("failed to read key data: %w", err)
+		contactLen := int(binary.BigEndian.Uint64(temp))
+
+		contactData := make([]byte, contactLen)
+		if _, err := buffer.Read(contactData); err != nil {
+			return fmt.Errorf("failed to read contact data: %w", err)
 		}
-		if _, err := buffer.Read(temp); err != nil {
-			return fmt.Errorf("failed to read value length: %w", err)
+
+		contact := &Contact{}
+		if err := contact.Unmarshal(contactData); err != nil {
+			return fmt.Errorf("failed to unmarshal contact: %w", err)
 		}
-		valueLen := int(binary.BigEndian.Uint64(temp))
-		b.SetValue[i] = make([]byte, valueLen)
-		if _, err := buffer.Read(b.SetValue[i]); err != nil {
-			return fmt.Errorf("failed to read value data: %w", err)
-		}
+
+		b.Contacts = append(b.Contacts, contact)
 	}
 
 	return nil
 }
 
-func (s *Store) AddNodeToBucket(bucketIndex int, nodeID []byte, data []byte) (*Contact, error) {
-	s.bucketLock.Lock()
-	defer s.bucketLock.Unlock()
+func (s *Store) LockBucket(index int64) func() {
+	m, _ := s.bucketLock.LoadOrStore(index, &sync.RWMutex{})
+	m.Lock()
 
-	key := fmt.Sprintf("bucket:%d", bucketIndex)
-	bucketData, err := s.Get([]byte(key))
-	var bucket Bucket
-	if err != nil {
-		if errors.Is(err, pebble.ErrNotFound) {
-			bucket = Bucket{
-				Index:    int64(bucketIndex),
-				Count:    0,
-				SetKey:   [][]byte{},
-				SetValue: [][]byte{},
-			}
-		} else {
-			return nil, fmt.Errorf("failed to get bucket data: %w", err)
-		}
-	} else {
-		if err := bucket.Unmarshal(bucketData); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal bucket data: %w", err)
-		}
+	return func() {
+		m.Unlock()
 	}
-
-	bucket.SetKey = append(bucket.SetKey, nodeID)
-	bucket.SetValue = append(bucket.SetValue, data)
-	bucket.Count++
-
-	removed := (*Contact)(nil)
-	if bucket.Count > int64(s.kBucketCount) {
-		bucket.Count = int64(s.kBucketCount)
-		removedData := bucket.SetValue[0]
-		removed = &Contact{}
-		if err := removed.Unmarshal(removedData); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal removed contact: %w", err)
-		}
-		bucket.SetKey = bucket.SetKey[1:]
-		bucket.SetValue = bucket.SetValue[1:]
-	}
-
-	if err := s.Put([]byte(key), bucket.Marshal()); err != nil {
-		return nil, fmt.Errorf("failed to put updated bucket data: %w", err)
-	}
-
-	return removed, nil
 }
 
-func (s *Store) GetNodeFromBucket(bucketIndex int, nodeID []byte) ([]byte, error) {
-	s.bucketLock.Lock()
-	defer s.bucketLock.Unlock()
-
-	key := fmt.Sprintf("bucket:%d", bucketIndex)
-	bucketData, err := s.Get([]byte(key))
+func (s *Store) GetBucket(index int64) (*Bucket, error) {
+	data, err := s.Get([]byte(fmt.Sprintf("bucket:%d", index)))
 	if err != nil {
-		return nil, fmt.Errorf("failed to get bucket data: %w", err)
+		if err == pebble.ErrNotFound {
+			return &Bucket{Index: index, Contacts: []*Contact{}}, nil
+		}
+		return nil, fmt.Errorf("failed to get bucket from store: %w", err)
 	}
 
-	var bucket Bucket
-	if err := bucket.Unmarshal(bucketData); err != nil {
+	bucket := &Bucket{}
+	if err := bucket.Unmarshal(data); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal bucket data: %w", err)
 	}
 
-	for i, id := range bucket.SetKey {
-		if bytes.Equal(id, nodeID) {
-			value := bucket.SetValue[i]
-
-			bucket.SetKey = append(bucket.SetKey[:i], bucket.SetKey[i+1:]...)
-			bucket.SetKey = append(bucket.SetKey, id)
-			bucket.SetValue = append(bucket.SetValue[:i], bucket.SetValue[i+1:]...)
-			bucket.SetValue = append(bucket.SetValue, value)
-
-			return value, nil
-		}
-	}
-
-	return nil, fmt.Errorf("node not found in bucket")
+	return bucket, nil
 }
 
-func (s *Store) GetAllNodesInBucket(bucketIndex int) ([][]byte, error) {
-	s.bucketLock.Lock()
-	defer s.bucketLock.Unlock()
-
-	key := fmt.Sprintf("bucket:%d", bucketIndex)
-	bucketData, err := s.Get([]byte(key))
-	if err != nil {
-		// If bucket doesn't exist, return empty slice (not an error)
-		if errors.Is(err, pebble.ErrNotFound) {
-			return [][]byte{}, nil
-		}
-		return nil, fmt.Errorf("failed to get bucket data: %w", err)
-	}
-
-	var bucket Bucket
-	if err := bucket.Unmarshal(bucketData); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal bucket data: %w", err)
-	}
-
-	return bucket.SetValue, nil
-}
-
-func (s *Store) RemoveNodeFromBucket(bucketIndex int, nodeID []byte) error {
-	s.bucketLock.Lock()
-	defer s.bucketLock.Unlock()
-
-	key := fmt.Sprintf("bucket:%d", bucketIndex)
-	bucketData, err := s.Get([]byte(key))
-	if err != nil {
-		return fmt.Errorf("failed to get bucket data: %w", err)
-	}
-
-	var bucket Bucket
-	if err := bucket.Unmarshal(bucketData); err != nil {
-		return fmt.Errorf("failed to unmarshal bucket data: %w", err)
-	}
-
-	for i, id := range bucket.SetKey {
-		if bytes.Equal(id, nodeID) {
-			bucket.SetKey = append(bucket.SetKey[:i], bucket.SetKey[i+1:]...)
-			bucket.SetValue = append(bucket.SetValue[:i], bucket.SetValue[i+1:]...)
-			bucket.Count--
-			break
-		}
-	}
-
-	if err := s.Put([]byte(key), bucket.Marshal()); err != nil {
-		return fmt.Errorf("failed to put updated bucket data: %w", err)
+func (s *Store) SaveBucket(bucket *Bucket) error {
+	data := bucket.Marshal()
+	if err := s.Put([]byte(fmt.Sprintf("bucket:%d", bucket.Index)), data); err != nil {
+		return fmt.Errorf("failed to save bucket to store: %w", err)
 	}
 
 	return nil
