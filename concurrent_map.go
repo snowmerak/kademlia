@@ -25,6 +25,26 @@ func (cm *ConcurrentMap[K, V]) Store(key K, value V) {
 	cm.m.Store(key, value)
 }
 
+func (cm *ConcurrentMap[K, V]) LoadOrStore(key K, value V) (actual V, loaded bool) {
+	actualValue, loaded := cm.m.LoadOrStore(key, value)
+	if !loaded {
+		v, ok := actualValue.(V)
+		if !ok {
+			var zero V
+			return zero, false
+		}
+		return v, false
+	}
+
+	v, ok := actualValue.(V)
+	if !ok {
+		var zero V
+		return zero, false
+	}
+
+	return v, true
+}
+
 func (cm *ConcurrentMap[K, V]) Delete(key K) {
 	cm.m.Delete(key)
 }
