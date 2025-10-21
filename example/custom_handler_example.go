@@ -14,21 +14,6 @@ import (
 
 // Custom RPC type (must be > 2)
 // RPCTypeCustomEcho is defined in main.go
-
-// createEchoHandler is defined in main.go
-func _unusedCreateEchoHandler() kademlia.RPCHandler {
-	return func(sess *kademlia.Session, payload []byte) ([]byte, error) {
-		log.Printf("[CustomHandler] ECHO request from %x: %s", sess.RemoteID(), string(payload))
-
-		// Echo back the same payload
-		response := make([]byte, 4+len(payload))
-		binary.BigEndian.PutUint32(response[:4], RPCTypeCustomEcho)
-		copy(response[4:], payload)
-
-		return response, nil
-	}
-}
-
 func customHandlerExample() {
 	// Create temp directory for test
 	tempDir, err := os.MkdirTemp("", "kademlia-custom-handler-")
@@ -56,7 +41,7 @@ func customHandlerExample() {
 	time.Sleep(500 * time.Millisecond)
 
 	log.Println("\n=== Registering Custom Handler ===")
-	
+
 	// Register custom ECHO handler on Node1
 	if err := node1.RegisterHandler(RPCTypeCustomEcho, createEchoHandler()); err != nil {
 		log.Fatalf("Failed to register custom handler: %v", err)
@@ -67,9 +52,8 @@ func customHandlerExample() {
 	log.Println("\n=== Bootstrap ===")
 	ctx := context.Background()
 	node1Contact := &kademlia.Contact{
-		ID:   node1.ID(),
-		Host: "127.0.0.1",
-		Port: 9001,
+		ID:    node1.ID(),
+		Addrs: []string{"127.0.0.1:9001"},
 	}
 	if err := node2.Bootstrap(ctx, []*kademlia.Contact{node1Contact}); err != nil {
 		log.Fatalf("Failed to bootstrap: %v", err)
@@ -78,7 +62,7 @@ func customHandlerExample() {
 
 	// Test custom RPC
 	log.Println("\n=== Testing Custom ECHO RPC ===")
-	
+
 	testMessage := []byte("Hello from Node2!")
 	log.Printf("Sending ECHO request: %s", string(testMessage))
 
