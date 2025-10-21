@@ -34,12 +34,6 @@ func createEchoHandler() kademlia.RPCHandler {
 func main() {
 	log.SetFlags(log.Ltime | log.Lshortfile)
 
-	// Check for command-line argument
-	if len(os.Args) > 1 && os.Args[1] == "custom" {
-		customHandlerExample()
-		return
-	}
-	
 	basicExample()
 }
 
@@ -164,13 +158,13 @@ func basicExample() {
 
 	// Test Custom Handler (ECHO)
 	log.Println("\n=== Testing Custom ECHO Handler ===")
-	
+
 	// Register ECHO handler on Node1
 	if err := node1.RegisterHandler(RPCTypeCustomEcho, createEchoHandler()); err != nil {
 		log.Printf("✗ Failed to register custom handler: %v", err)
 	} else {
 		log.Println("✓ Custom ECHO handler registered on Node1")
-		
+
 		testMessage := []byte("Hello from Node2!")
 		log.Printf("Sending ECHO request: %s", string(testMessage))
 
@@ -212,13 +206,23 @@ func basicExample() {
 				log.Println("✗ ECHO response timeout")
 			}
 		}
-		
+
 		// Unregister handler
 		node1.UnregisterHandler(RPCTypeCustomEcho)
 		log.Println("✓ Custom handler unregistered")
 	}
 
-	log.Println("\n=== Test Complete ===")
+	// Print maintenance statistics
+	log.Println("=== Maintenance Statistics ===")
+	printMaintenanceStats("Node1", node1)
+	printMaintenanceStats("Node2", node2)
+	printMaintenanceStats("Node3", node3)
+
+	log.Println("=== Test Complete ===")
+	log.Println("Maintenance is running in background:")
+	log.Println("  - Dead node check: every 5 minutes")
+	log.Println("  - Bucket refresh: every 15 minutes")
+	log.Println("  - Random lookup: every 30 minutes")
 	log.Println("Press Ctrl+C to exit or waiting 5 seconds...")
 	time.Sleep(5 * time.Second)
 }
@@ -251,4 +255,23 @@ func createNode(dbPath, listenHost string, listenPort, kBucketCount int) (*kadem
 	}
 
 	return router, nil
+}
+
+func printMaintenanceStats(nodeName string, router *kademlia.Router) {
+	stats := router.GetMaintenanceStats()
+	log.Printf("%s Statistics:", nodeName)
+	log.Printf("  Total Contacts: %v", stats["total_contacts"])
+	log.Printf("  Non-empty Buckets: %v", stats["non_empty_buckets"])
+	log.Printf("  Total Buckets: %v", stats["total_buckets"])
+	log.Printf("  Active Sessions: %v", stats["active_sessions"])
+
+	// Pretty print bucket distribution (only non-empty buckets)
+	if bucketDist, ok := stats["bucket_distribution"].(map[int]int); ok {
+		log.Printf("  Bucket Distribution (non-empty):")
+		for idx, count := range bucketDist {
+			if count > 0 {
+				log.Printf("    Bucket %3d: %d contacts", idx, count)
+			}
+		}
+	}
 }
