@@ -18,10 +18,10 @@ import (
 type Session struct {
 	router           *Router
 	conn             net.Conn
-	remoteID         []byte
-	remoteAddr       string
-	remotePublicKey  []byte
-	remoteListenPort int // The port the remote peer is listening on
+	remoteID              []byte
+	remoteAddr            string
+	remotePublicKey       []byte
+	remoteBroadcastAddrs  []string // The addresses the remote peer can be reached at
 	encryptor        Encryptor
 	sharedSecret     []byte
 	writeMu          sync.Mutex
@@ -37,11 +37,11 @@ type Session struct {
 
 // HandshakeMessage represents the initial key exchange message
 type HandshakeMessage struct {
-	NodeID     []byte
-	PublicKey  []byte // Encapsulation key for MLKEM
-	CipherText []byte // Optional: cipher text from client (empty in initial message from server)
-	Timestamp  int64
-	ListenPort int // The port this node is listening on for incoming connections
+	NodeID         []byte
+	PublicKey      []byte   // Encapsulation key for MLKEM
+	CipherText     []byte   // Optional: cipher text from client (empty in initial message from server)
+	Timestamp      int64
+	BroadcastAddrs []string // The addresses this node can be reached at
 }
 
 // Marshal serializes the handshake message
@@ -70,9 +70,15 @@ func (h *HandshakeMessage) Marshal() []byte {
 	binary.BigEndian.PutUint64(temp, uint64(h.Timestamp))
 	buf.Write(temp)
 
-	// ListenPort
-	binary.BigEndian.PutUint32(temp[:4], uint32(h.ListenPort))
+	// BroadcastAddrs count + data
+	binary.BigEndian.PutUint32(temp[:4], uint32(len(h.BroadcastAddrs)))
 	buf.Write(temp[:4])
+	for _, addr := range h.BroadcastAddrs {
+		addrBytes := []byte(addr)
+		binary.BigEndian.PutUint32(temp[:4], uint32(len(addrBytes)))
+		buf.Write(temp[:4])
+		buf.Write(addrBytes)
+	}
 
 	return buf.Bytes()
 }
@@ -120,11 +126,23 @@ func (h *HandshakeMessage) Unmarshal(data []byte) error {
 	}
 	h.Timestamp = int64(binary.BigEndian.Uint64(temp))
 
-	// Read ListenPort
+	// Read BroadcastAddrs
 	if _, err := buf.Read(temp[:4]); err != nil {
-		return fmt.Errorf("failed to read ListenPort: %w", err)
+		return fmt.Errorf("failed to read BroadcastAddrs count: %w", err)
 	}
-	h.ListenPort = int(binary.BigEndian.Uint32(temp[:4]))
+	addrsCount := binary.BigEndian.Uint32(temp[:4])
+	h.BroadcastAddrs = make([]string, addrsCount)
+	for i := uint32(0); i < addrsCount; i++ {
+		if _, err := buf.Read(temp[:4]); err != nil {
+			return fmt.Errorf("failed to read BroadcastAddr[%d] length: %w", i, err)
+		}
+		addrLen := binary.BigEndian.Uint32(temp[:4])
+		addrBytes := make([]byte, addrLen)
+		if _, err := buf.Read(addrBytes); err != nil {
+			return fmt.Errorf("failed to read BroadcastAddr[%d]: %w", i, err)
+		}
+		h.BroadcastAddrs[i] = string(addrBytes)
+	}
 
 	return nil
 }
@@ -143,14 +161,14 @@ func InitiateSession(
 
 	// Step 1: Send our encapsulation key to server
 	handshake := &HandshakeMessage{
-		NodeID:     localID,
-		PublicKey:  localEncapsulationKey,
-		CipherText: nil, // Empty in first message
-		Timestamp:  time.Now().Unix(),
-		ListenPort: router.listenAddr.Port,
+		NodeID:         localID,
+		PublicKey:      localEncapsulationKey,
+		CipherText:     nil, // Empty in first message
+		Timestamp:      time.Now().Unix(),
+		BroadcastAddrs: router.broadcastAddrs,
 	}
 
-	log.Printf("[InitiateSession] Sending encapsulation key: NodeID=%x, ListenPort=%d", handshake.NodeID, handshake.ListenPort)
+	log.Printf("[InitiateSession] Sending encapsulation key: NodeID=%x, BroadcastAddrs=%v", handshake.NodeID, handshake.BroadcastAddrs)
 
 	handshakeData := handshake.Marshal()
 	if err := writeFrame(conn, handshakeData); err != nil {
@@ -168,8 +186,8 @@ func InitiateSession(
 		return nil, fmt.Errorf("failed to unmarshal peer handshake: %w", err)
 	}
 
-	log.Printf("[InitiateSession] Received peer handshake: NodeID=%x, ListenPort=%d",
-		peerHandshake.NodeID, peerHandshake.ListenPort)
+	log.Printf("[InitiateSession] Received peer handshake: NodeID=%x, BroadcastAddrs=%v",
+		peerHandshake.NodeID, peerHandshake.BroadcastAddrs)
 
 	// Step 3: Encapsulate with peer's encapsulation key to get our cipher text
 	clientCipherText, clientSharedSecret, err := router.EncapsulateSecret(peerHandshake.PublicKey)
@@ -189,11 +207,11 @@ func InitiateSession(
 
 	// Step 5: Send our cipher text back to server
 	finalHandshake := &HandshakeMessage{
-		NodeID:     localID,
-		PublicKey:  localEncapsulationKey,
-		CipherText: clientCipherText,
-		Timestamp:  time.Now().Unix(),
-		ListenPort: router.listenAddr.Port,
+		NodeID:         localID,
+		PublicKey:      localEncapsulationKey,
+		CipherText:     clientCipherText,
+		Timestamp:      time.Now().Unix(),
+		BroadcastAddrs: router.broadcastAddrs,
 	}
 
 	finalHandshakeData := finalHandshake.Marshal()
@@ -227,7 +245,7 @@ func InitiateSession(
 		remoteID:          peerHandshake.NodeID,
 		remoteAddr:        conn.RemoteAddr().String(),
 		remotePublicKey:   peerHandshake.PublicKey,
-		remoteListenPort:  peerHandshake.ListenPort,
+		remoteBroadcastAddrs: peerHandshake.BroadcastAddrs,
 		encryptor:         encryptor,
 		sharedSecret:      finalSharedSecret,
 		lastActivity:      time.Now(),
@@ -254,8 +272,8 @@ func AcceptSession(
 		return nil, fmt.Errorf("failed to unmarshal peer handshake: %w", err)
 	}
 
-	log.Printf("[AcceptSession] Received peer handshake: NodeID=%x, ListenPort=%d",
-		peerHandshake.NodeID, peerHandshake.ListenPort)
+	log.Printf("[AcceptSession] Received peer handshake: NodeID=%x, BroadcastAddrs=%v",
+		peerHandshake.NodeID, peerHandshake.BroadcastAddrs)
 
 	localID := router.ID()
 	localEncapsulationKey, err := router.PublicKey()
@@ -273,15 +291,15 @@ func AcceptSession(
 
 	// Step 3: Send our encapsulation key + cipher text back to client
 	handshake := &HandshakeMessage{
-		NodeID:     localID,
-		PublicKey:  localEncapsulationKey,
-		CipherText: serverCipherText,
-		Timestamp:  time.Now().Unix(),
-		ListenPort: router.listenAddr.Port,
+		NodeID:         localID,
+		PublicKey:      localEncapsulationKey,
+		CipherText:     serverCipherText,
+		Timestamp:      time.Now().Unix(),
+		BroadcastAddrs: router.broadcastAddrs,
 	}
 
-	log.Printf("[AcceptSession] Sending handshake: NodeID=%x, ListenPort=%d",
-		handshake.NodeID, handshake.ListenPort)
+	log.Printf("[AcceptSession] Sending handshake: NodeID=%x, BroadcastAddrs=%v",
+		handshake.NodeID, handshake.BroadcastAddrs)
 
 	handshakeData := handshake.Marshal()
 	if err := writeFrame(conn, handshakeData); err != nil {
@@ -333,7 +351,7 @@ func AcceptSession(
 		remoteID:          peerHandshake.NodeID,
 		remoteAddr:        conn.RemoteAddr().String(),
 		remotePublicKey:   peerHandshake.PublicKey,
-		remoteListenPort:  peerHandshake.ListenPort,
+		remoteBroadcastAddrs: peerHandshake.BroadcastAddrs,
 		encryptor:         encryptor,
 		sharedSecret:      finalSharedSecret,
 		lastActivity:      time.Now(),
@@ -415,9 +433,11 @@ func (s *Session) RemoteAddr() string {
 	return s.remoteAddr
 }
 
-// RemoteListenPort returns the port the peer is listening on
-func (s *Session) RemoteListenPort() int {
-	return s.remoteListenPort
+// RemoteBroadcastAddrs returns the addresses the peer can be reached at
+func (s *Session) RemoteBroadcastAddrs() []string {
+	addrs := make([]string, len(s.remoteBroadcastAddrs))
+	copy(addrs, s.remoteBroadcastAddrs)
+	return addrs
 }
 
 // PublicKey returns the peer's public key

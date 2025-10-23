@@ -242,6 +242,7 @@ func createNode(dbPath, listenHost string, listenPort, kBucketCount int) (*kadem
 		KBucketCount:   kBucketCount,
 		ListenAddrHost: listenHost,
 		ListenAddrPort: listenPort,
+		BroadcastAddrs: []string{fmt.Sprintf("%s:%d", listenHost, listenPort)},
 	}
 
 	router, err := kademlia.NewRouter(config)

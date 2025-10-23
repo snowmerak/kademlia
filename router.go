@@ -23,6 +23,7 @@ type Config struct {
 	KBucketCount   int
 	ListenAddrHost string
 	ListenAddrPort int
+	BroadcastAddrs []string
 }
 
 // RPCHandler is a function that handles custom RPC requests
@@ -30,13 +31,14 @@ type Config struct {
 type RPCHandler func(sess *Session, payload []byte) ([]byte, error)
 
 type Router struct {
-	id           []byte
-	hasher       IDHasher
-	keyExchanger KeyExchanger
-	store        *Store
-	tcpListener  *net.TCPListener
-	kBucketCount int
-	listenAddr   *net.TCPAddr
+	id             []byte
+	hasher         IDHasher
+	keyExchanger   KeyExchanger
+	store          *Store
+	tcpListener    *net.TCPListener
+	kBucketCount   int
+	listenAddr     *net.TCPAddr
+	broadcastAddrs []string
 
 	sessions *ConcurrentMap[string, *Session]
 
@@ -71,6 +73,7 @@ func NewRouter(config Config) (*Router, error) {
 		tcpListener:     tcpLis,
 		kBucketCount:    config.KBucketCount,
 		listenAddr:      tcpAddr,
+		broadcastAddrs:  config.BroadcastAddrs,
 		sessions:        NewConcurrentMap[string, *Session](),
 		customHandlers:  NewConcurrentMap[uint32, RPCHandler](),
 		maintenanceStop: make(chan struct{}),
@@ -102,17 +105,13 @@ func NewRouter(config Config) (*Router, error) {
 			go sess.HandleIncoming()
 
 			go func() {
-				// Build address from remote connection info
-				remoteAddr := sess.RemoteAddr()
-				listenPort := sess.RemoteListenPort()
-
-				// Construct address string (can be enhanced to support multiaddr format)
-				addr := fmt.Sprintf("%s:%d", remoteAddr, listenPort)
+				// Use the broadcast addresses provided by the remote peer
+				broadcastAddrs := sess.RemoteBroadcastAddrs()
 
 				c := &Contact{
 					ID:        sess.RemoteID(),
 					PublicKey: sess.PublicKey(),
-					Addrs:     []string{addr},
+					Addrs:     broadcastAddrs,
 				}
 
 				log.Printf("[Router] Storing node %x in routing table (Addrs: %v)", c.ID, c.Addrs)
@@ -132,18 +131,18 @@ func (r *Router) Close() error {
 	// Stop maintenance goroutine
 	close(r.maintenanceStop)
 	<-r.maintenanceDone
-	
+
 	// Close TCP listener
 	if r.tcpListener != nil {
 		r.tcpListener.Close()
 	}
-	
+
 	// Close all sessions
 	r.sessions.Range(func(key string, sess *Session) bool {
 		sess.Close()
 		return true
 	})
-	
+
 	return r.store.Close()
 }
 
@@ -517,32 +516,32 @@ func (r *Router) GetOrCreateSession(nodeID []byte) (*Session, error) {
 // runMaintenance performs periodic maintenance tasks
 func (r *Router) runMaintenance() {
 	defer close(r.maintenanceDone)
-	
+
 	// Maintenance intervals
 	bucketRefreshTicker := time.NewTicker(15 * time.Minute)
 	deadNodeCheckTicker := time.NewTicker(5 * time.Minute)
 	randomLookupTicker := time.NewTicker(30 * time.Minute)
-	
+
 	defer bucketRefreshTicker.Stop()
 	defer deadNodeCheckTicker.Stop()
 	defer randomLookupTicker.Stop()
-	
+
 	log.Println("[Maintenance] Started maintenance routine")
-	
+
 	for {
 		select {
 		case <-r.maintenanceStop:
 			log.Println("[Maintenance] Stopping maintenance routine")
 			return
-			
+
 		case <-bucketRefreshTicker.C:
 			log.Println("[Maintenance] Running bucket refresh")
 			r.refreshBuckets()
-			
+
 		case <-deadNodeCheckTicker.C:
 			log.Println("[Maintenance] Running dead node check")
 			r.checkDeadNodes()
-			
+
 		case <-randomLookupTicker.C:
 			log.Println("[Maintenance] Running random lookup")
 			r.performRandomLookup()
@@ -553,30 +552,30 @@ func (r *Router) runMaintenance() {
 // refreshBuckets refreshes stale buckets by performing lookups
 func (r *Router) refreshBuckets() {
 	maxIndex := r.hasher.MaxIDLength()
-	
+
 	for bucketIdx := 0; bucketIdx < maxIndex; bucketIdx++ {
 		bucket, err := r.store.GetBucket(int64(bucketIdx))
 		if err != nil {
 			continue
 		}
-		
+
 		// Skip empty buckets
 		if len(bucket.Contacts) == 0 {
 			continue
 		}
-		
+
 		// Refresh bucket by looking up a random ID in that bucket's range
 		randomID := r.generateRandomIDForBucket(bucketIdx)
-		
+
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		contacts, err := r.IterativeFindNode(ctx, randomID, r.kBucketCount)
 		cancel()
-		
+
 		if err != nil {
 			log.Printf("[Maintenance] Failed to refresh bucket %d: %v", bucketIdx, err)
 			continue
 		}
-		
+
 		log.Printf("[Maintenance] Refreshed bucket %d, found %d nodes", bucketIdx, len(contacts))
 	}
 }
@@ -586,58 +585,58 @@ func (r *Router) checkDeadNodes() {
 	maxIndex := r.hasher.MaxIDLength()
 	removedCount := 0
 	checkedCount := 0
-	
+
 	for bucketIdx := 0; bucketIdx < maxIndex; bucketIdx++ {
 		bucket, err := r.store.GetBucket(int64(bucketIdx))
 		if err != nil {
 			continue
 		}
-		
+
 		if len(bucket.Contacts) == 0 {
 			continue
 		}
-		
+
 		// Check each contact in the bucket
 		activeContacts := []*Contact{}
-		
+
 		for _, contact := range bucket.Contacts {
 			checkedCount++
-			
+
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			isAlive := false
-			
+
 			err := r.SendPing(ctx, contact.ID, func(data []byte, err error) {
 				if err == nil {
 					isAlive = true
 				}
 			})
-			
+
 			// Wait a bit for response
 			time.Sleep(3 * time.Second)
 			cancel()
-			
+
 			if err == nil && isAlive {
 				activeContacts = append(activeContacts, contact)
 			} else {
 				log.Printf("[Maintenance] Removing dead node %x from bucket %d", contact.ID, bucketIdx)
 				removedCount++
-				
+
 				// Remove session if exists
 				r.sessions.Delete(string(contact.ID))
 			}
 		}
-		
+
 		// Update bucket with only active contacts
 		if len(activeContacts) != len(bucket.Contacts) {
 			bucket.Contacts = activeContacts
-			
+
 			unlock := r.store.LockBucket(int64(bucketIdx))
 			r.store.SaveBucket(bucket)
 			unlock()
 		}
 	}
-	
-	log.Printf("[Maintenance] Dead node check complete: checked %d nodes, removed %d dead nodes", 
+
+	log.Printf("[Maintenance] Dead node check complete: checked %d nodes, removed %d dead nodes",
 		checkedCount, removedCount)
 }
 
@@ -648,16 +647,16 @@ func (r *Router) performRandomLookup() {
 	for i := range randomID {
 		randomID[i] = byte(time.Now().UnixNano() % 256)
 	}
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	
+
 	contacts, err := r.IterativeFindNode(ctx, randomID, r.kBucketCount)
 	if err != nil {
 		log.Printf("[Maintenance] Random lookup failed: %v", err)
 		return
 	}
-	
+
 	log.Printf("[Maintenance] Random lookup found %d nodes", len(contacts))
 }
 
@@ -666,21 +665,21 @@ func (r *Router) generateRandomIDForBucket(bucketIdx int) []byte {
 	// Create ID with appropriate distance
 	randomID := make([]byte, len(r.id))
 	copy(randomID, r.id)
-	
+
 	// Flip bit at position to create ID in target bucket
 	bitPos := r.hasher.MaxIDLength() - bucketIdx - 1
 	bytePos := bitPos / 8
 	bitOffset := bitPos % 8
-	
+
 	if bytePos < len(randomID) {
 		randomID[bytePos] ^= (1 << bitOffset)
 	}
-	
+
 	// Add some randomness to lower bits
 	for i := bytePos + 1; i < len(randomID); i++ {
 		randomID[i] = byte(time.Now().UnixNano() % 256)
 	}
-	
+
 	return randomID
 }
 
@@ -690,13 +689,13 @@ func (r *Router) GetMaintenanceStats() map[string]interface{} {
 	bucketCounts := make(map[int]int)
 	totalContacts := 0
 	nonEmptyBuckets := 0
-	
+
 	for bucketIdx := 0; bucketIdx < maxIndex; bucketIdx++ {
 		bucket, err := r.store.GetBucket(int64(bucketIdx))
 		if err != nil {
 			continue
 		}
-		
+
 		count := len(bucket.Contacts)
 		if count > 0 {
 			nonEmptyBuckets++
@@ -704,18 +703,18 @@ func (r *Router) GetMaintenanceStats() map[string]interface{} {
 		bucketCounts[bucketIdx] = count
 		totalContacts += count
 	}
-	
+
 	sessionCount := 0
 	r.sessions.Range(func(key string, sess *Session) bool {
 		sessionCount++
 		return true
 	})
-	
+
 	return map[string]interface{}{
-		"total_contacts":     totalContacts,
-		"non_empty_buckets":  nonEmptyBuckets,
-		"total_buckets":      maxIndex,
-		"active_sessions":    sessionCount,
+		"total_contacts":      totalContacts,
+		"non_empty_buckets":   nonEmptyBuckets,
+		"total_buckets":       maxIndex,
+		"active_sessions":     sessionCount,
 		"bucket_distribution": bucketCounts,
 	}
 }
