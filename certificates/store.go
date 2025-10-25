@@ -50,7 +50,12 @@ func (sd *StoredData) MarshalBinary() ([]byte, error) {
 	copy(result[4:4+len(pubBytes)], pubBytes)
 
 	offset := 4 + len(pubBytes)
-	for key, sig := range sd.signatures {
+	keys := make([]string, 0, len(sd.signatures))
+	for key := range sd.signatures {
+		keys = append(keys, key)
+	}
+	for _, key := range keys {
+		sig := sd.signatures[key]
 		binary.BigEndian.PutUint32(result[offset:offset+4], uint32(len(key)))
 		offset += 4
 		copy(result[offset:offset+len(key)], []byte(key))
