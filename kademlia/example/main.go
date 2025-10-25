@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/snowmerak/kademlia/kademlia"
+	"github.com/snowmerak/satellite-network/kademlia"
 )
 
 // Custom RPC type (must be > 2)
@@ -18,7 +18,7 @@ const (
 )
 
 // createEchoHandler creates a custom ECHO handler
-func createEchoHandler() kademlia.kademlia {
+func createEchoHandler() kademlia.RPCHandler {
 	return func(sess *kademlia.Session, payload []byte) ([]byte, error) {
 		log.Printf("[CustomHandler] ECHO request from %x: %s", sess.RemoteID(), string(payload))
 
