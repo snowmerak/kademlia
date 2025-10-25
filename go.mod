@@ -3,6 +3,7 @@ module github.com/snowmerak/satellite-network
 go 1.25.3
 
 require (
+	github.com/cloudflare/circl v1.6.1
 	github.com/cockroachdb/pebble v1.1.5
 	github.com/google/uuid v1.6.0
 	golang.org/x/crypto v0.43.0
