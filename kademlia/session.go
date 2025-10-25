@@ -10,26 +10,26 @@ import (
 	"sync"
 	"time"
 
-	"github.com/snowmerak/kademlia/rpc"
+	"github.com/snowmerak/satellite-network/kademlia/rpc"
 	"google.golang.org/protobuf/proto"
 )
 
 // Session represents an encrypted connection with a peer node
 type Session struct {
-	router           *Router
-	conn             net.Conn
-	remoteID              []byte
-	remoteAddr            string
-	remotePublicKey       []byte
-	remoteBroadcastAddrs  []string // The addresses the remote peer can be reached at
-	encryptor        Encryptor
-	sharedSecret     []byte
-	writeMu          sync.Mutex
-	readMu           sync.Mutex
-	lastActivity     time.Time
-	activityMu       sync.RWMutex
-	closed           bool
-	closeMu          sync.Mutex
+	router               *Router
+	conn                 net.Conn
+	remoteID             []byte
+	remoteAddr           string
+	remotePublicKey      []byte
+	remoteBroadcastAddrs []string // The addresses the remote peer can be reached at
+	encryptor            Encryptor
+	sharedSecret         []byte
+	writeMu              sync.Mutex
+	readMu               sync.Mutex
+	lastActivity         time.Time
+	activityMu           sync.RWMutex
+	closed               bool
+	closeMu              sync.Mutex
 
 	// Response callbacks for async RPC
 	responseCallbacks *ConcurrentMap[string, func([]byte, error)]
@@ -38,8 +38,8 @@ type Session struct {
 // HandshakeMessage represents the initial key exchange message
 type HandshakeMessage struct {
 	NodeID         []byte
-	PublicKey      []byte   // Encapsulation key for MLKEM
-	CipherText     []byte   // Optional: cipher text from client (empty in initial message from server)
+	PublicKey      []byte // Encapsulation key for MLKEM
+	CipherText     []byte // Optional: cipher text from client (empty in initial message from server)
 	Timestamp      int64
 	BroadcastAddrs []string // The addresses this node can be reached at
 }
@@ -240,17 +240,17 @@ func InitiateSession(
 	}
 
 	return &Session{
-		router:            router,
-		conn:              conn,
-		remoteID:          peerHandshake.NodeID,
-		remoteAddr:        conn.RemoteAddr().String(),
-		remotePublicKey:   peerHandshake.PublicKey,
+		router:               router,
+		conn:                 conn,
+		remoteID:             peerHandshake.NodeID,
+		remoteAddr:           conn.RemoteAddr().String(),
+		remotePublicKey:      peerHandshake.PublicKey,
 		remoteBroadcastAddrs: peerHandshake.BroadcastAddrs,
-		encryptor:         encryptor,
-		sharedSecret:      finalSharedSecret,
-		lastActivity:      time.Now(),
-		closed:            false,
-		responseCallbacks: NewConcurrentMap[string, func([]byte, error)](),
+		encryptor:            encryptor,
+		sharedSecret:         finalSharedSecret,
+		lastActivity:         time.Now(),
+		closed:               false,
+		responseCallbacks:    NewConcurrentMap[string, func([]byte, error)](),
 	}, nil
 }
 
@@ -346,17 +346,17 @@ func AcceptSession(
 	}
 
 	return &Session{
-		router:            router,
-		conn:              conn,
-		remoteID:          peerHandshake.NodeID,
-		remoteAddr:        conn.RemoteAddr().String(),
-		remotePublicKey:   peerHandshake.PublicKey,
+		router:               router,
+		conn:                 conn,
+		remoteID:             peerHandshake.NodeID,
+		remoteAddr:           conn.RemoteAddr().String(),
+		remotePublicKey:      peerHandshake.PublicKey,
 		remoteBroadcastAddrs: peerHandshake.BroadcastAddrs,
-		encryptor:         encryptor,
-		sharedSecret:      finalSharedSecret,
-		lastActivity:      time.Now(),
-		closed:            false,
-		responseCallbacks: NewConcurrentMap[string, func([]byte, error)](),
+		encryptor:            encryptor,
+		sharedSecret:         finalSharedSecret,
+		lastActivity:         time.Now(),
+		closed:               false,
+		responseCallbacks:    NewConcurrentMap[string, func([]byte, error)](),
 	}, nil
 }
 

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/snowmerak/kademlia/rpc"
+	"github.com/snowmerak/satellite-network/kademlia/rpc"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -47,7 +47,7 @@ func (r *Router) SendPing(ctx context.Context, nodeID []byte, callback func([]by
 	// Register callback if provided
 	if callback != nil {
 		sess.RegisterResponseCallback(string(messageID[:]), callback)
-		
+
 		// Set timeout to clean up callback if no response
 		go func() {
 			<-ctx.Done()

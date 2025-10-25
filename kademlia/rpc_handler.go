@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/snowmerak/kademlia/rpc"
+	"github.com/snowmerak/satellite-network/kademlia/rpc"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -30,13 +30,13 @@ func (r *Router) HandleRPC(sess *Session, rpcType uint32, payload []byte) ([]byt
 			if rpcType > 2 && len(payload) >= 16 {
 				messageID := payload[:16]
 				actualPayload := payload[16:]
-				
+
 				// Call the handler with actual payload
 				respPayload, err := handler(sess, actualPayload)
 				if err != nil {
 					return nil, err
 				}
-				
+
 				// Build response: [4-byte rpcType][16-byte messageID][respPayload]
 				result := make([]byte, 4+16+len(respPayload))
 				binary.BigEndian.PutUint32(result[:4], rpcType)

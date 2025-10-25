@@ -474,7 +474,7 @@ See the Architecture and Performance Considerations sections above for detailed 
 
 ## License
 
-See [LICENSE](LICENSE) file for details.
+See [LICENSE](../LICENSE) file for details.
 
 ## Contributing
 

@@ -1,4 +1,4 @@
-module github.com/snowmerak/kademlia
+module github.com/snowmerak/satellite-network
 
 go 1.25.3
 
