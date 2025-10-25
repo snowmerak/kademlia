@@ -20,7 +20,7 @@ const (
 type Config struct {
 	KeyExchanger   KeyExchanger
 	Hasher         IDHasher
-	StorePath      string
+	Store          *store.Store
 	KBucketCount   int
 	ListenAddrHost string
 	ListenAddrPort int
@@ -52,12 +52,7 @@ type Router struct {
 }
 
 func NewRouter(config Config) (*Router, error) {
-	ss, err := store.NewStore(config.StorePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create underlying store: %w", err)
-	}
-
-	strg, err := NewStore(ss, config.KBucketCount)
+	strg, err := NewStore(config.Store, config.KBucketCount)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create store: %w", err)
 	}

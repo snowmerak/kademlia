@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/snowmerak/satellite-network/kademlia"
+	"github.com/snowmerak/satellite-network/shared/store"
 )
 
 // Custom RPC type (must be > 2)
@@ -234,11 +235,16 @@ func createNode(dbPath, listenHost string, listenPort, kBucketCount int) (*kadem
 	// Use X25519 key exchange
 	keyExchanger := &kademlia.MLKEMKeyExchanger{}
 
+	ss, err := store.NewStore(dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create store: %w", err)
+	}
+
 	// Create router with config
 	config := kademlia.Config{
 		KeyExchanger:   keyExchanger,
 		Hasher:         hasher,
-		StorePath:      dbPath,
+		Store:          ss,
 		KBucketCount:   kBucketCount,
 		ListenAddrHost: listenHost,
 		ListenAddrPort: listenPort,
