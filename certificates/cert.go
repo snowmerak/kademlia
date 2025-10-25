@@ -210,3 +210,20 @@ func (p *Public) ID() ([]byte, error) {
 	hashed := blake3.Sum512(pubBytes)
 	return hashed[:], nil
 }
+
+func (p *Private) SignData(data []byte) ([]byte, error) {
+	signature, err := p.sig.Sign(rand.Reader, data, crypto.Hash(0))
+	if err != nil {
+		return nil, fmt.Errorf("failed to sign data: %w", err)
+	}
+
+	return signature, nil
+}
+
+func (p *Public) VerifyDataSignature(data, signature []byte) error {
+	if !p.sig.Scheme().Verify(p.sig, data, signature, nil) {
+		return fmt.Errorf("data signature verification failed")
+	}
+
+	return nil
+}
