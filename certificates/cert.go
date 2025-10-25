@@ -109,7 +109,7 @@ func (p *Private) MarshalBinary() ([]byte, error) {
 		return nil, fmt.Errorf("failed to marshal public key: %w", err)
 	}
 
-	result := make([]byte, 12+len(kxBytes)+len(sigBytes))
+	result := make([]byte, 12+len(kxBytes)+len(sigBytes)+len(pubBytes))
 	binary.BigEndian.PutUint32(result[:4], uint32(len(kxBytes)))
 	binary.BigEndian.PutUint32(result[4:8], uint32(len(sigBytes)))
 	binary.BigEndian.PutUint32(result[8:12], uint32(len(pubBytes)))
