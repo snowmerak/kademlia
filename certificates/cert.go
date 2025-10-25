@@ -1,12 +1,15 @@
 package certificates
 
 import (
+	"crypto"
 	"crypto/mlkem"
+	"crypto/rand"
 	"encoding/binary"
 	"fmt"
 	"io"
 
 	"github.com/cloudflare/circl/sign/mldsa/mldsa87"
+	"lukechampine.com/blake3"
 )
 
 type Private struct {
@@ -154,4 +157,56 @@ func (p *Private) UnmarshalBinary(data []byte) error {
 	p.public = pub
 
 	return nil
+}
+
+func (p *Private) Decapsulate(ciphertext []byte) ([]byte, error) {
+	sharedSecret, err := p.kx.Decapsulate(ciphertext)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decapsulate ciphertext: %w", err)
+	}
+
+	return sharedSecret, nil
+}
+
+func (p *Public) Encapsulate() (sharedSecret []byte, cipherText []byte, err error) {
+	sharedSecret, cipherText = p.kx.Encapsulate()
+
+	return sharedSecret, cipherText, nil
+}
+
+func (p *Private) SignPublicKey() ([]byte, error) {
+	pubBytes, err := p.public.MarshalBinary()
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal public key for signing: %w", err)
+	}
+
+	signature, err := p.sig.Sign(rand.Reader, pubBytes, crypto.Hash(0))
+	if err != nil {
+		return nil, fmt.Errorf("failed to sign public key: %w", err)
+	}
+
+	return signature, nil
+}
+
+func (p *Public) VerifySignature(signature []byte) error {
+	pubBytes, err := p.MarshalBinary()
+	if err != nil {
+		return fmt.Errorf("failed to marshal public key for verification: %w", err)
+	}
+
+	if !p.sig.Scheme().Verify(p.sig, pubBytes, signature, nil) {
+		return fmt.Errorf("signature verification failed")
+	}
+
+	return nil
+}
+
+func (p *Public) ID() ([]byte, error) {
+	pubBytes, err := p.MarshalBinary()
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal public key for ID generation: %w", err)
+	}
+
+	hashed := blake3.Sum512(pubBytes)
+	return hashed[:], nil
 }
