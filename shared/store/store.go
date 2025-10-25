@@ -96,3 +96,7 @@ func (s *Store) Has(key []byte) (bool, error) {
 
 	return true, nil
 }
+
+func (s *Store) GetDB() *pebble.DB {
+	return s.db
+}
