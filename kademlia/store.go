@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/pebble"
+	"github.com/cockroachdb/pebble/vfs"
 )
 
 type Store struct {
@@ -16,8 +17,17 @@ type Store struct {
 	kBucketCount int
 }
 
+const StoreInMemory = ":memory:"
+
 func NewStore(dbPath string, kBucketCount int) (*Store, error) {
-	db, err := pebble.Open(dbPath, &pebble.Options{})
+	opt := &pebble.Options{}
+	opt.Cache = pebble.NewCache(64 * 1024 * 1024) // 64MB cache for in-memory DB
+	opt.MemTableSize = 16 * 1024 * 1024
+	if dbPath == StoreInMemory {
+		opt.FS = vfs.NewMem()
+	}
+
+	db, err := pebble.Open(dbPath, opt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open Pebble DB: %w", err)
 	}
