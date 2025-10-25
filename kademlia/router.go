@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/pebble"
+	"github.com/snowmerak/satellite-network/shared/store"
 )
 
 const (
@@ -51,7 +52,12 @@ type Router struct {
 }
 
 func NewRouter(config Config) (*Router, error) {
-	strg, err := NewStore(config.StorePath, config.KBucketCount)
+	ss, err := store.NewStore(config.StorePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create underlying store: %w", err)
+	}
+
+	strg, err := NewStore(ss, config.KBucketCount)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create store: %w", err)
 	}

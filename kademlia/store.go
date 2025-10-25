@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/pebble"
-	"github.com/cockroachdb/pebble/vfs"
+	"github.com/snowmerak/satellite-network/shared/store"
 )
 
 type Store struct {
@@ -19,21 +19,9 @@ type Store struct {
 
 const StoreInMemory = ":memory:"
 
-func NewStore(dbPath string, kBucketCount int) (*Store, error) {
-	opt := &pebble.Options{}
-	opt.Cache = pebble.NewCache(64 * 1024 * 1024) // 64MB cache for in-memory DB
-	opt.MemTableSize = 16 * 1024 * 1024
-	if dbPath == StoreInMemory {
-		opt.FS = vfs.NewMem()
-	}
-
-	db, err := pebble.Open(dbPath, opt)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open Pebble DB: %w", err)
-	}
-
+func NewStore(s *store.Store, kBucketCount int) (*Store, error) {
 	return &Store{
-		store:        db,
+		store:        s.GetDB(),
 		bucketLock:   NewConcurrentMap[int64, *sync.RWMutex](),
 		kBucketCount: kBucketCount,
 	}, nil
