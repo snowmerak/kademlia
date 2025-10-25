@@ -15,7 +15,7 @@ func TestNewStoredData(t *testing.T) {
 	}
 	pub := priv.Public()
 
-	sd := certificates.NewStoredData(pub)
+	sd := certificates.NewStoredPublicKey(pub)
 
 	if sd.GetPublicKey() != pub {
 		t.Error("Public key not set correctly")
@@ -34,7 +34,7 @@ func TestAddSignature(t *testing.T) {
 	}
 	pub := priv.Public()
 
-	sd := certificates.NewStoredData(pub)
+	sd := certificates.NewStoredPublicKey(pub)
 
 	// Add new signature
 	added, err := sd.AddSignature("key1", []byte("signature1"))
@@ -71,7 +71,7 @@ func TestMarshalUnmarshalBinary(t *testing.T) {
 	}
 	pub := priv.Public()
 
-	sd := certificates.NewStoredData(pub)
+	sd := certificates.NewStoredPublicKey(pub)
 
 	// Add some signatures
 	sd.AddSignature("key1", []byte("sig1"))
@@ -84,7 +84,7 @@ func TestMarshalUnmarshalBinary(t *testing.T) {
 	}
 
 	// Unmarshal
-	sd2 := &certificates.StoredData{}
+	sd2 := &certificates.StoredPublicKey{}
 	err = sd2.UnmarshalBinary(data)
 	if err != nil {
 		t.Fatalf("Failed to unmarshal: %v", err)
@@ -103,7 +103,7 @@ func TestMarshalUnmarshalBinary(t *testing.T) {
 }
 
 func TestUnmarshalBinaryErrors(t *testing.T) {
-	sd := &certificates.StoredData{}
+	sd := &certificates.StoredPublicKey{}
 
 	// Too short data
 	err := sd.UnmarshalBinary([]byte{1, 2, 3})

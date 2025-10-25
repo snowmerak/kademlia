@@ -5,43 +5,43 @@ import (
 	"fmt"
 )
 
-type StoredData struct {
+type StoredPublicKey struct {
 	publicKey  *Public
 	signatures map[string][]byte
 }
 
-func NewStoredData(pub *Public) *StoredData {
-	return &StoredData{
+func NewStoredPublicKey(pub *Public) *StoredPublicKey {
+	return &StoredPublicKey{
 		publicKey:  pub,
 		signatures: make(map[string][]byte),
 	}
 }
 
-func (sd *StoredData) AddSignature(key string, signature []byte) (bool, error) {
-	if _, exists := sd.signatures[key]; exists {
+func (sp *StoredPublicKey) AddSignature(key string, signature []byte) (bool, error) {
+	if _, exists := sp.signatures[key]; exists {
 		return false, nil
 	}
 
-	sd.signatures[key] = signature
+	sp.signatures[key] = signature
 	return true, nil
 }
 
-func (sd *StoredData) GetPublicKey() *Public {
-	return sd.publicKey
+func (sp *StoredPublicKey) GetPublicKey() *Public {
+	return sp.publicKey
 }
 
-func (sd *StoredData) GetSignatures() map[string][]byte {
-	return sd.signatures
+func (sp *StoredPublicKey) GetSignatures() map[string][]byte {
+	return sp.signatures
 }
 
-func (sd *StoredData) MarshalBinary() ([]byte, error) {
-	pubBytes, err := sd.publicKey.MarshalBinary()
+func (sp *StoredPublicKey) MarshalBinary() ([]byte, error) {
+	pubBytes, err := sp.publicKey.MarshalBinary()
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal public key: %w", err)
 	}
 
 	totalLen := 4 + len(pubBytes)
-	for key, sig := range sd.signatures {
+	for key, sig := range sp.signatures {
 		totalLen += 4 + len(key) + 4 + len(sig)
 	}
 
@@ -50,12 +50,12 @@ func (sd *StoredData) MarshalBinary() ([]byte, error) {
 	copy(result[4:4+len(pubBytes)], pubBytes)
 
 	offset := 4 + len(pubBytes)
-	keys := make([]string, 0, len(sd.signatures))
-	for key := range sd.signatures {
+	keys := make([]string, 0, len(sp.signatures))
+	for key := range sp.signatures {
 		keys = append(keys, key)
 	}
 	for _, key := range keys {
-		sig := sd.signatures[key]
+		sig := sp.signatures[key]
 		binary.BigEndian.PutUint32(result[offset:offset+4], uint32(len(key)))
 		offset += 4
 		copy(result[offset:offset+len(key)], []byte(key))
@@ -70,7 +70,7 @@ func (sd *StoredData) MarshalBinary() ([]byte, error) {
 	return result, nil
 }
 
-func (sd *StoredData) UnmarshalBinary(data []byte) error {
+func (sp *StoredPublicKey) UnmarshalBinary(data []byte) error {
 	if len(data) < 4 {
 		return fmt.Errorf("data too short to unmarshal StoredData")
 	}
@@ -86,8 +86,8 @@ func (sd *StoredData) UnmarshalBinary(data []byte) error {
 		return fmt.Errorf("failed to unmarshal public key: %w", err)
 	}
 
-	sd.publicKey = pub
-	sd.signatures = make(map[string][]byte)
+	sp.publicKey = pub
+	sp.signatures = make(map[string][]byte)
 
 	offset := int(4 + pubLen)
 	for offset < len(data) {
@@ -115,7 +115,7 @@ func (sd *StoredData) UnmarshalBinary(data []byte) error {
 		sig := data[offset : offset+int(sigLen)]
 		offset += int(sigLen)
 
-		sd.signatures[key] = sig
+		sp.signatures[key] = sig
 	}
 
 	return nil
