@@ -3,18 +3,35 @@ package certificates
 import (
 	"encoding/binary"
 	"fmt"
+	"time"
+
+	"github.com/cockroachdb/pebble"
+	"github.com/snowmerak/satellite-network/shared/store"
 )
 
 type StoredPublicKey struct {
-	publicKey  *Public
-	signatures map[string][]byte
+	previousHash []byte
+	publicKey    *Public
+	signatures   map[string][]byte
+	createdAt    time.Time
 }
 
-func NewStoredPublicKey(pub *Public) *StoredPublicKey {
+func NewStoredPublicKey(pub *Public, createdAt time.Time) *StoredPublicKey {
 	return &StoredPublicKey{
 		publicKey:  pub,
 		signatures: make(map[string][]byte),
+		createdAt:  createdAt,
 	}
+}
+
+func (sp *StoredPublicKey) SetPreviousHash(hash []byte) {
+	sp.previousHash = hash
+}
+
+func (sp *StoredPublicKey) GetPreviousHash() []byte {
+	h := make([]byte, len(sp.previousHash))
+	copy(h, sp.previousHash)
+	return h
 }
 
 func (sp *StoredPublicKey) AddSignature(key string, signature []byte) (bool, error) {
@@ -44,6 +61,7 @@ func (sp *StoredPublicKey) MarshalBinary() ([]byte, error) {
 	for key, sig := range sp.signatures {
 		totalLen += 4 + len(key) + 4 + len(sig)
 	}
+	totalLen += 4 + len(sp.previousHash)
 
 	result := make([]byte, totalLen)
 	binary.BigEndian.PutUint32(result[:4], uint32(len(pubBytes)))
@@ -66,6 +84,10 @@ func (sp *StoredPublicKey) MarshalBinary() ([]byte, error) {
 		copy(result[offset:offset+len(sig)], sig)
 		offset += len(sig)
 	}
+
+	binary.BigEndian.PutUint32(result[offset:offset+4], uint32(len(sp.previousHash)))
+	offset += 4
+	copy(result[offset:offset+len(sp.previousHash)], sp.previousHash)
 
 	return result, nil
 }
@@ -118,5 +140,26 @@ func (sp *StoredPublicKey) UnmarshalBinary(data []byte) error {
 		sp.signatures[key] = sig
 	}
 
+	if len(data[offset:]) < 4 {
+		return fmt.Errorf("data too short to unmarshal previous hash length")
+	}
+	prevHashLen := binary.BigEndian.Uint32(data[offset : offset+4])
+	offset += 4
+
+	if len(data[offset:]) < int(prevHashLen) {
+		return fmt.Errorf("data too short to unmarshal previous hash")
+	}
+	sp.previousHash = data[offset : offset+int(prevHashLen)]
+
 	return nil
+}
+
+type Store struct {
+	db *pebble.DB
+}
+
+func NewStore(store *store.Store) (*Store, error) {
+	return &Store{
+		db: store.GetDB(),
+	}, nil
 }
