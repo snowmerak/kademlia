@@ -7,6 +7,7 @@ import (
 
 	"github.com/cockroachdb/pebble"
 	"github.com/snowmerak/satellite-network/shared/store"
+	"github.com/snowmerak/satellite-network/shared/synx"
 )
 
 type StoredPublicKey struct {
@@ -218,12 +219,14 @@ const (
 )
 
 type Store struct {
-	db *pebble.DB
+	db      *pebble.DB
+	keyLock *synx.KeyLock
 }
 
 func NewStore(store *store.Store) (*Store, error) {
 	return &Store{
-		db: store.GetDB(),
+		db:      store.GetDB(),
+		keyLock: synx.NewKeyLock(),
 	}, nil
 }
 
