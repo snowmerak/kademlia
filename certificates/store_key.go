@@ -29,10 +29,10 @@ func (s *Store) StorePublicKey(spk *StoredPublicKey) error {
 	}
 
 	key := make([]byte, 0, len(StoredPublicKeyPrefix)+len(formatedID)+1+len(blockID))
-	copy(key, StoredPublicKeyPrefix)
-	copy(key[len(StoredPublicKeyPrefix):], formatedID)
-	key[len(StoredPublicKeyPrefix)+len(formatedID)] = ':'
-	copy(key[len(StoredPublicKeyPrefix)+len(formatedID)+1:], blockID)
+	key = append(key, []byte(StoredPublicKeyPrefix)...)
+	key = append(key, []byte(formatedID)...)
+	key = append(key, ':')
+	key = append(key, blockID...)
 	if err := s.db.Set(key, marshaledPublicKey, nil); err != nil {
 		return fmt.Errorf("failed to store public key: %w", err)
 	}
@@ -46,9 +46,9 @@ func (s *Store) UpdateLatestPublicKeyReference(id []byte, newBlockID []byte) err
 	defer lockUnlock()
 
 	key := make([]byte, 0, len(StoredPublicKeyPrefix)+len(formatedID)+len(LatestPublicKeySuffix))
-	copy(key, StoredPublicKeyPrefix)
-	copy(key[len(StoredPublicKeyPrefix):], formatedID)
-	copy(key[len(StoredPublicKeyPrefix)+len(formatedID):], LatestPublicKeySuffix)
+	key = append(key, []byte(StoredPublicKeyPrefix)...)
+	key = append(key, []byte(formatedID)...)
+	key = append(key, []byte(LatestPublicKeySuffix)...)
 	if err := s.db.Set(key, newBlockID, nil); err != nil {
 		return fmt.Errorf("failed to update latest public key reference: %w", err)
 	}
@@ -62,9 +62,9 @@ func (s *Store) GetLatestPublicKeyReference(id []byte) ([]byte, error) {
 	defer lockUnlock()
 
 	key := make([]byte, 0, len(StoredPublicKeyPrefix)+len(formatedID)+len(LatestPublicKeySuffix))
-	copy(key, StoredPublicKeyPrefix)
-	copy(key[len(StoredPublicKeyPrefix):], formatedID)
-	copy(key[len(StoredPublicKeyPrefix)+len(formatedID):], LatestPublicKeySuffix)
+	key = append(key, []byte(StoredPublicKeyPrefix)...)
+	key = append(key, []byte(formatedID)...)
+	key = append(key, []byte(LatestPublicKeySuffix)...)
 	value, closer, err := s.db.Get(key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get latest public key reference: %w", err)
@@ -83,17 +83,17 @@ func (s *Store) GetStoredPublicKey(id, blockID []byte) (*StoredPublicKey, error)
 	defer lockUnlock()
 
 	key := make([]byte, 0, len(StoredPublicKeyPrefix)+len(formatedID)+1+len(blockID))
-	copy(key, StoredPublicKeyPrefix)
-	copy(key[len(StoredPublicKeyPrefix):], formatedID)
-	key[len(StoredPublicKeyPrefix)+len(formatedID)] = ':'
-	copy(key[len(StoredPublicKeyPrefix)+len(formatedID)+1:], blockID)
+	key = append(key, []byte(StoredPublicKeyPrefix)...)
+	key = append(key, []byte(formatedID)...)
+	key = append(key, ':')
+	key = append(key, blockID...)
 	value, closer, err := s.db.Get(key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get stored public key: %w", err)
 	}
 	defer closer.Close()
 
-	spk := &StoredPublicKey{}
+	spk := NewEmptyStoredPublicKey()
 	if err := spk.publicKey.UnmarshalBinary(value); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal stored public key: %w", err)
 	}
@@ -107,8 +107,8 @@ func (s *Store) DeleteStoredPublicKey(id []byte) error {
 	defer lockUnlock()
 
 	key := make([]byte, 0, len(StoredPublicKeyPrefix)+len(formatedID))
-	copy(key, StoredPublicKeyPrefix)
-	copy(key[len(StoredPublicKeyPrefix):], formatedID)
+	key = append(key, []byte(StoredPublicKeyPrefix)...)
+	key = append(key, []byte(formatedID)...)
 	iter, err := s.db.NewIter(&pebble.IterOptions{
 		LowerBound: key,
 		UpperBound: append(key, 0xFF),

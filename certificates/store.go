@@ -27,6 +27,13 @@ func NewStoredPublicKey(id []byte, pub *Public, createdAt time.Time) *StoredPubl
 	}
 }
 
+func NewEmptyStoredPublicKey() *StoredPublicKey {
+	return &StoredPublicKey{
+		publicKey:  &Public{},
+		signatures: make(map[string][]byte),
+	}
+}
+
 func (sp *StoredPublicKey) SetPreviousHash(hash []byte) {
 	sp.previousHash = hash
 }
