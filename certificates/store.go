@@ -213,6 +213,10 @@ func (sp *StoredPublicKey) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
+const (
+	StoreInMemory = ":memory:"
+)
+
 type Store struct {
 	db *pebble.DB
 }
@@ -221,4 +225,8 @@ func NewStore(store *store.Store) (*Store, error) {
 	return &Store{
 		db: store.GetDB(),
 	}, nil
+}
+
+func (s *Store) Close() error {
+	return s.db.Close()
 }
