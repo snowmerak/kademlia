@@ -39,6 +39,9 @@ func TestStorePublicKey(t *testing.T) {
 		t.Fatalf("Failed to get public key ID: %v", err)
 	}
 
+	unlock := s.LockPublicKey(id)
+	defer unlock()
+
 	spk := certificates.NewStoredPublicKey(id, pub, time.Now())
 
 	err = s.StorePublicKey(spk)
@@ -80,10 +83,16 @@ func TestUpdateLatestPublicKeyReference(t *testing.T) {
 
 	blockID := []byte("test_block_id")
 
+	unlock := s.LockPublicKey(id)
 	err = s.UpdateLatestPublicKeyReference(id, blockID)
 	if err != nil {
+		unlock()
 		t.Fatalf("Failed to update latest public key reference: %v", err)
 	}
+	unlock()
+
+	runlock := s.RLockPublicKey(id)
+	defer runlock()
 
 	retrieved, err := s.GetLatestPublicKeyReference(id)
 	if err != nil {
@@ -110,10 +119,16 @@ func TestGetLatestPublicKeyReference(t *testing.T) {
 
 	blockID := []byte("latest_block_id")
 
+	unlock := s.LockPublicKey(id)
 	err = s.UpdateLatestPublicKeyReference(id, blockID)
 	if err != nil {
+		unlock()
 		t.Fatalf("Failed to update latest public key reference: %v", err)
 	}
+	unlock()
+
+	runlock := s.RLockPublicKey(id)
+	defer runlock()
 
 	retrieved, err := s.GetLatestPublicKeyReference(id)
 	if err != nil {
@@ -138,12 +153,18 @@ func TestGetStoredPublicKey(t *testing.T) {
 		t.Fatalf("Failed to get public key ID: %v", err)
 	}
 
+	unlock := s.LockPublicKey(id)
 	spk := certificates.NewStoredPublicKey(id, pub, time.Now())
 
 	err = s.StorePublicKey(spk)
 	if err != nil {
+		unlock()
 		t.Fatalf("Failed to store public key: %v", err)
 	}
+	unlock()
+
+	runlock := s.RLockPublicKey(id)
+	defer runlock()
 
 	blockID, err := pub.ID()
 	if err != nil {
@@ -181,17 +202,26 @@ func TestDeleteStoredPublicKey(t *testing.T) {
 		t.Fatalf("Failed to get public key ID: %v", err)
 	}
 
+	unlock1 := s.LockPublicKey(id)
 	spk := certificates.NewStoredPublicKey(id, pub, time.Now())
 
 	err = s.StorePublicKey(spk)
 	if err != nil {
+		unlock1()
 		t.Fatalf("Failed to store public key: %v", err)
 	}
+	unlock1()
 
+	unlock2 := s.LockPublicKey(id)
 	err = s.DeleteStoredPublicKey(id)
 	if err != nil {
+		unlock2()
 		t.Fatalf("Failed to delete stored public key: %v", err)
 	}
+	unlock2()
+
+	runlock := s.RLockPublicKey(id)
+	defer runlock()
 
 	// Try to get it back - should fail or return nil
 	blockID, err := pub.ID()
@@ -201,5 +231,75 @@ func TestDeleteStoredPublicKey(t *testing.T) {
 	_, err = s.GetStoredPublicKey(id, blockID)
 	if err == nil {
 		t.Fatal("Expected error when getting deleted public key, but got none")
+	}
+}
+
+func TestLockPublicKey(t *testing.T) {
+	s := setupTestStore(t)
+
+	id := []byte("test_lock_id")
+
+	unlock := s.LockPublicKey(id)
+	defer unlock()
+
+	// Test that the lock is held by trying to lock again in another goroutine
+	done := make(chan bool, 1)
+	go func() {
+		unlock2 := s.LockPublicKey(id)
+		unlock2()
+		done <- true
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("Second lock should have been blocked")
+	case <-time.After(100 * time.Millisecond):
+		// Expected: the second lock is blocked
+	}
+}
+
+func TestRLockPublicKey(t *testing.T) {
+	s := setupTestStore(t)
+
+	id := []byte("test_rlock_id")
+
+	unlock := s.RLockPublicKey(id)
+	defer unlock()
+
+	// Test that read lock allows multiple readers
+	done := make(chan bool, 2)
+	go func() {
+		unlock2 := s.RLockPublicKey(id)
+		unlock2()
+		done <- true
+	}()
+	go func() {
+		unlock3 := s.RLockPublicKey(id)
+		unlock3()
+		done <- true
+	}()
+
+	// Both should complete quickly
+	for i := 0; i < 2; i++ {
+		select {
+		case <-done:
+		case <-time.After(1 * time.Second):
+			t.Fatal("Read lock should not block other read locks")
+		}
+	}
+
+	// Now test that write lock is blocked
+	writeDone := make(chan bool, 1)
+	go func() {
+		unlock4 := s.LockPublicKey(id)
+		unlock4()
+		writeDone <- true
+	}()
+
+	select {
+	case <-writeDone:
+		t.Fatal("Write lock should have been blocked by read lock")
+	case <-time.After(100 * time.Millisecond):
+		// Expected: write lock is blocked
 	}
 }
