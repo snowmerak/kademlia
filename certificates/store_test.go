@@ -4,26 +4,50 @@ import (
 	"crypto/rand"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/snowmerak/satellite-network/certificates"
 )
 
-func TestNewStoredData(t *testing.T) {
+func TestNewStoredPublicKey(t *testing.T) {
+	priv, err := certificates.NewPrivate(rand.Reader)
+	if err != nil {
+		t.Fatalf("Failed to create private key: %v", err)
+	}
+	pub := priv.Public()
+	createdAt := time.Now()
+
+	sp := certificates.NewStoredPublicKey(pub, createdAt)
+
+	if sp.GetPublicKey() != pub {
+		t.Error("Public key not set correctly")
+	}
+
+	if !sp.GetCreatedAt().Equal(createdAt) {
+		t.Error("CreatedAt not set correctly")
+	}
+
+	sigs := sp.GetSignatures()
+	if len(sigs) != 0 {
+		t.Errorf("Expected empty signatures map, got %d entries", len(sigs))
+	}
+}
+
+func TestSetGetPreviousHash(t *testing.T) {
 	priv, err := certificates.NewPrivate(rand.Reader)
 	if err != nil {
 		t.Fatalf("Failed to create private key: %v", err)
 	}
 	pub := priv.Public()
 
-	sd := certificates.NewStoredPublicKey(pub)
+	sp := certificates.NewStoredPublicKey(pub, time.Now())
 
-	if sd.GetPublicKey() != pub {
-		t.Error("Public key not set correctly")
-	}
+	hash := []byte("previous_hash")
+	sp.SetPreviousHash(hash)
 
-	sigs := sd.GetSignatures()
-	if len(sigs) != 0 {
-		t.Errorf("Expected empty signatures map, got %d entries", len(sigs))
+	retrieved := sp.GetPreviousHash()
+	if !reflect.DeepEqual(retrieved, hash) {
+		t.Error("Previous hash not set or retrieved correctly")
 	}
 }
 
@@ -34,10 +58,10 @@ func TestAddSignature(t *testing.T) {
 	}
 	pub := priv.Public()
 
-	sd := certificates.NewStoredPublicKey(pub)
+	sp := certificates.NewStoredPublicKey(pub, time.Now())
 
 	// Add new signature
-	added, err := sd.AddSignature("key1", []byte("signature1"))
+	added, err := sp.AddSignature("key1", []byte("signature1"))
 	if err != nil {
 		t.Errorf("Failed to add signature: %v", err)
 	}
@@ -46,7 +70,7 @@ func TestAddSignature(t *testing.T) {
 	}
 
 	// Try to add duplicate
-	added, err = sd.AddSignature("key1", []byte("signature2"))
+	added, err = sp.AddSignature("key1", []byte("signature2"))
 	if err != nil {
 		t.Errorf("Failed to check duplicate: %v", err)
 	}
@@ -55,7 +79,7 @@ func TestAddSignature(t *testing.T) {
 	}
 
 	// Check signatures
-	sigs := sd.GetSignatures()
+	sigs := sp.GetSignatures()
 	if len(sigs) != 1 {
 		t.Errorf("Expected 1 signature, got %d", len(sigs))
 	}
@@ -70,43 +94,56 @@ func TestMarshalUnmarshalBinary(t *testing.T) {
 		t.Fatalf("Failed to create private key: %v", err)
 	}
 	pub := priv.Public()
+	createdAt := time.Now()
 
-	sd := certificates.NewStoredPublicKey(pub)
+	sp := certificates.NewStoredPublicKey(pub, createdAt)
+
+	// Set previous hash
+	hash := []byte("prev_hash")
+	sp.SetPreviousHash(hash)
 
 	// Add some signatures
-	sd.AddSignature("key1", []byte("sig1"))
-	sd.AddSignature("key2", []byte("sig2"))
+	sp.AddSignature("key1", []byte("sig1"))
+	sp.AddSignature("key2", []byte("sig2"))
 
 	// Marshal
-	data, err := sd.MarshalBinary()
+	data, err := sp.MarshalBinary()
 	if err != nil {
 		t.Fatalf("Failed to marshal: %v", err)
 	}
 
 	// Unmarshal
-	sd2 := &certificates.StoredPublicKey{}
-	err = sd2.UnmarshalBinary(data)
+	sp2 := &certificates.StoredPublicKey{}
+	err = sp2.UnmarshalBinary(data)
 	if err != nil {
 		t.Fatalf("Failed to unmarshal: %v", err)
 	}
 
 	// Compare
-	if !reflect.DeepEqual(sd.GetPublicKey(), sd2.GetPublicKey()) {
+	if !reflect.DeepEqual(sp.GetPublicKey(), sp2.GetPublicKey()) {
 		t.Error("Public keys do not match after marshal/unmarshal")
 	}
 
-	sigs1 := sd.GetSignatures()
-	sigs2 := sd2.GetSignatures()
+	if !reflect.DeepEqual(sp.GetPreviousHash(), sp2.GetPreviousHash()) {
+		t.Error("Previous hashes do not match after marshal/unmarshal")
+	}
+
+	if !sp.GetCreatedAt().Equal(sp2.GetCreatedAt()) {
+		t.Error("CreatedAt does not match after marshal/unmarshal")
+	}
+
+	sigs1 := sp.GetSignatures()
+	sigs2 := sp2.GetSignatures()
 	if !reflect.DeepEqual(sigs1, sigs2) {
 		t.Error("Signatures do not match after marshal/unmarshal")
 	}
 }
 
 func TestUnmarshalBinaryErrors(t *testing.T) {
-	sd := &certificates.StoredPublicKey{}
+	sp := &certificates.StoredPublicKey{}
 
 	// Too short data
-	err := sd.UnmarshalBinary([]byte{1, 2, 3})
+	err := sp.UnmarshalBinary([]byte{1, 2, 3})
 	if err == nil {
 		t.Error("Expected error for too short data")
 	}

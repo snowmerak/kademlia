@@ -34,6 +34,10 @@ func (sp *StoredPublicKey) GetPreviousHash() []byte {
 	return h
 }
 
+func (sp *StoredPublicKey) GetCreatedAt() time.Time {
+	return sp.createdAt
+}
+
 func (sp *StoredPublicKey) AddSignature(key string, signature []byte) (bool, error) {
 	if _, exists := sp.signatures[key]; exists {
 		return false, nil
@@ -57,17 +61,21 @@ func (sp *StoredPublicKey) MarshalBinary() ([]byte, error) {
 		return nil, fmt.Errorf("failed to marshal public key: %w", err)
 	}
 
-	totalLen := 4 + len(pubBytes)
+	totalLen := 4 + len(pubBytes) + 4 + len(sp.previousHash)
 	for key, sig := range sp.signatures {
 		totalLen += 4 + len(key) + 4 + len(sig)
 	}
-	totalLen += 4 + len(sp.previousHash)
 
 	result := make([]byte, totalLen)
 	binary.BigEndian.PutUint32(result[:4], uint32(len(pubBytes)))
 	copy(result[4:4+len(pubBytes)], pubBytes)
 
 	offset := 4 + len(pubBytes)
+	binary.BigEndian.PutUint32(result[offset:offset+4], uint32(len(sp.previousHash)))
+	offset += 4
+	copy(result[offset:offset+len(sp.previousHash)], sp.previousHash)
+	offset += len(sp.previousHash)
+
 	keys := make([]string, 0, len(sp.signatures))
 	for key := range sp.signatures {
 		keys = append(keys, key)
@@ -85,16 +93,12 @@ func (sp *StoredPublicKey) MarshalBinary() ([]byte, error) {
 		offset += len(sig)
 	}
 
-	binary.BigEndian.PutUint32(result[offset:offset+4], uint32(len(sp.previousHash)))
-	offset += 4
-	copy(result[offset:offset+len(sp.previousHash)], sp.previousHash)
-
 	return result, nil
 }
 
 func (sp *StoredPublicKey) UnmarshalBinary(data []byte) error {
 	if len(data) < 4 {
-		return fmt.Errorf("data too short to unmarshal StoredData")
+		return fmt.Errorf("data too short to unmarshal StoredPublicKey")
 	}
 
 	pubLen := binary.BigEndian.Uint32(data[:4])
@@ -109,9 +113,22 @@ func (sp *StoredPublicKey) UnmarshalBinary(data []byte) error {
 	}
 
 	sp.publicKey = pub
-	sp.signatures = make(map[string][]byte)
 
 	offset := int(4 + pubLen)
+	if len(data[offset:]) < 4 {
+		return fmt.Errorf("data too short to unmarshal previous hash length")
+	}
+	prevHashLen := binary.BigEndian.Uint32(data[offset : offset+4])
+	offset += 4
+
+	if len(data[offset:]) < int(prevHashLen) {
+		return fmt.Errorf("data too short to unmarshal previous hash")
+	}
+	sp.previousHash = make([]byte, prevHashLen)
+	copy(sp.previousHash, data[offset:offset+int(prevHashLen)])
+	offset += int(prevHashLen)
+
+	sp.signatures = make(map[string][]byte)
 	for offset < len(data) {
 		if len(data[offset:]) < 4 {
 			return fmt.Errorf("data too short to unmarshal signature key length")
@@ -134,22 +151,12 @@ func (sp *StoredPublicKey) UnmarshalBinary(data []byte) error {
 		if len(data[offset:]) < int(sigLen) {
 			return fmt.Errorf("data too short to unmarshal signature")
 		}
-		sig := data[offset : offset+int(sigLen)]
+		sig := make([]byte, sigLen)
+		copy(sig, data[offset:offset+int(sigLen)])
 		offset += int(sigLen)
 
 		sp.signatures[key] = sig
 	}
-
-	if len(data[offset:]) < 4 {
-		return fmt.Errorf("data too short to unmarshal previous hash length")
-	}
-	prevHashLen := binary.BigEndian.Uint32(data[offset : offset+4])
-	offset += 4
-
-	if len(data[offset:]) < int(prevHashLen) {
-		return fmt.Errorf("data too short to unmarshal previous hash")
-	}
-	sp.previousHash = data[offset : offset+int(prevHashLen)]
 
 	return nil
 }
