@@ -12,11 +12,19 @@ const (
 	LatestPublicKeySuffix = ":latest"
 )
 
+func (s *Store) LockPublicKey(id []byte) func() {
+	formatedID := base64.URLEncoding.EncodeToString(id)
+	return s.keyLock.Lock(formatedID)
+}
+
+func (s *Store) RLockPublicKey(id []byte) func() {
+	formatedID := base64.URLEncoding.EncodeToString(id)
+	return s.keyLock.RLock(formatedID)
+}
+
 func (s *Store) StorePublicKey(spk *StoredPublicKey) error {
 	id := spk.GetID()
 	formatedID := base64.URLEncoding.EncodeToString(id)
-	lockUnlock := s.keyLock.Lock(formatedID)
-	defer lockUnlock()
 
 	marshaledPublicKey, err := spk.publicKey.MarshalBinary()
 	if err != nil {
@@ -42,8 +50,6 @@ func (s *Store) StorePublicKey(spk *StoredPublicKey) error {
 
 func (s *Store) UpdateLatestPublicKeyReference(id []byte, newBlockID []byte) error {
 	formatedID := base64.URLEncoding.EncodeToString(id)
-	lockUnlock := s.keyLock.Lock(formatedID)
-	defer lockUnlock()
 
 	key := make([]byte, 0, len(StoredPublicKeyPrefix)+len(formatedID)+len(LatestPublicKeySuffix))
 	key = append(key, []byte(StoredPublicKeyPrefix)...)
@@ -58,8 +64,6 @@ func (s *Store) UpdateLatestPublicKeyReference(id []byte, newBlockID []byte) err
 
 func (s *Store) GetLatestPublicKeyReference(id []byte) ([]byte, error) {
 	formatedID := base64.URLEncoding.EncodeToString(id)
-	lockUnlock := s.keyLock.RLock(formatedID)
-	defer lockUnlock()
 
 	key := make([]byte, 0, len(StoredPublicKeyPrefix)+len(formatedID)+len(LatestPublicKeySuffix))
 	key = append(key, []byte(StoredPublicKeyPrefix)...)
@@ -79,8 +83,6 @@ func (s *Store) GetLatestPublicKeyReference(id []byte) ([]byte, error) {
 
 func (s *Store) GetStoredPublicKey(id, blockID []byte) (*StoredPublicKey, error) {
 	formatedID := base64.URLEncoding.EncodeToString(id)
-	lockUnlock := s.keyLock.RLock(formatedID)
-	defer lockUnlock()
 
 	key := make([]byte, 0, len(StoredPublicKeyPrefix)+len(formatedID)+1+len(blockID))
 	key = append(key, []byte(StoredPublicKeyPrefix)...)
@@ -103,8 +105,6 @@ func (s *Store) GetStoredPublicKey(id, blockID []byte) (*StoredPublicKey, error)
 
 func (s *Store) DeleteStoredPublicKey(id []byte) error {
 	formatedID := base64.URLEncoding.EncodeToString(id)
-	lockUnlock := s.keyLock.Lock(formatedID)
-	defer lockUnlock()
 
 	key := make([]byte, 0, len(StoredPublicKeyPrefix)+len(formatedID))
 	key = append(key, []byte(StoredPublicKeyPrefix)...)
