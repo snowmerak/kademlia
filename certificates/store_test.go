@@ -15,12 +15,20 @@ func TestNewStoredPublicKey(t *testing.T) {
 		t.Fatalf("Failed to create private key: %v", err)
 	}
 	pub := priv.Public()
+	id, err := pub.ID()
+	if err != nil {
+		t.Fatalf("Failed to get public key ID: %v", err)
+	}
 	createdAt := time.Now()
 
-	sp := certificates.NewStoredPublicKey(pub, createdAt)
+	sp := certificates.NewStoredPublicKey(id, pub, createdAt)
 
 	if sp.GetPublicKey() != pub {
 		t.Error("Public key not set correctly")
+	}
+
+	if !reflect.DeepEqual(sp.GetID(), id) {
+		t.Error("ID not set correctly")
 	}
 
 	if !sp.GetCreatedAt().Equal(createdAt) {
@@ -39,8 +47,12 @@ func TestSetGetPreviousHash(t *testing.T) {
 		t.Fatalf("Failed to create private key: %v", err)
 	}
 	pub := priv.Public()
+	id, err := pub.ID()
+	if err != nil {
+		t.Fatalf("Failed to get public key ID: %v", err)
+	}
 
-	sp := certificates.NewStoredPublicKey(pub, time.Now())
+	sp := certificates.NewStoredPublicKey(id, pub, time.Now())
 
 	hash := []byte("previous_hash")
 	sp.SetPreviousHash(hash)
@@ -57,8 +69,12 @@ func TestAddSignature(t *testing.T) {
 		t.Fatalf("Failed to create private key: %v", err)
 	}
 	pub := priv.Public()
+	id, err := pub.ID()
+	if err != nil {
+		t.Fatalf("Failed to get public key ID: %v", err)
+	}
 
-	sp := certificates.NewStoredPublicKey(pub, time.Now())
+	sp := certificates.NewStoredPublicKey(id, pub, time.Now())
 
 	// Add new signature
 	added, err := sp.AddSignature("key1", []byte("signature1"))
@@ -94,9 +110,13 @@ func TestMarshalUnmarshalBinary(t *testing.T) {
 		t.Fatalf("Failed to create private key: %v", err)
 	}
 	pub := priv.Public()
+	id, err := pub.ID()
+	if err != nil {
+		t.Fatalf("Failed to get public key ID: %v", err)
+	}
 	createdAt := time.Now()
 
-	sp := certificates.NewStoredPublicKey(pub, createdAt)
+	sp := certificates.NewStoredPublicKey(id, pub, createdAt)
 
 	// Set previous hash
 	hash := []byte("prev_hash")
@@ -122,6 +142,10 @@ func TestMarshalUnmarshalBinary(t *testing.T) {
 	// Compare
 	if !reflect.DeepEqual(sp.GetPublicKey(), sp2.GetPublicKey()) {
 		t.Error("Public keys do not match after marshal/unmarshal")
+	}
+
+	if !reflect.DeepEqual(sp.GetID(), sp2.GetID()) {
+		t.Error("IDs do not match after marshal/unmarshal")
 	}
 
 	if !reflect.DeepEqual(sp.GetPreviousHash(), sp2.GetPreviousHash()) {

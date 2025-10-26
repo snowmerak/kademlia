@@ -36,6 +36,12 @@ func (sp *StoredPublicKey) GetPreviousHash() []byte {
 	return h
 }
 
+func (sp *StoredPublicKey) GetID() []byte {
+	h := make([]byte, len(sp.id))
+	copy(h, sp.id)
+	return h
+}
+
 func (sp *StoredPublicKey) GetCreatedAt() time.Time {
 	return sp.createdAt
 }
@@ -63,7 +69,12 @@ func (sp *StoredPublicKey) MarshalBinary() ([]byte, error) {
 		return nil, fmt.Errorf("failed to marshal public key: %w", err)
 	}
 
-	totalLen := 4 + len(pubBytes) + 4 + len(sp.previousHash) + 4 + len(sp.id)
+	createdAtBytes, err := sp.createdAt.MarshalBinary()
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal createdAt: %w", err)
+	}
+
+	totalLen := 4 + len(pubBytes) + 4 + len(sp.previousHash) + 4 + len(sp.id) + 4 + len(createdAtBytes)
 	for key, sig := range sp.signatures {
 		totalLen += 4 + len(key) + 4 + len(sig)
 	}
@@ -81,6 +92,10 @@ func (sp *StoredPublicKey) MarshalBinary() ([]byte, error) {
 	offset += 4
 	copy(result[offset:offset+len(sp.id)], sp.id)
 	offset += len(sp.id)
+	binary.BigEndian.PutUint32(result[offset:offset+4], uint32(len(createdAtBytes)))
+	offset += 4
+	copy(result[offset:offset+len(createdAtBytes)], createdAtBytes)
+	offset += len(createdAtBytes)
 
 	keys := make([]string, 0, len(sp.signatures))
 	for key := range sp.signatures {
@@ -146,6 +161,24 @@ func (sp *StoredPublicKey) UnmarshalBinary(data []byte) error {
 	sp.id = make([]byte, idLen)
 	copy(sp.id, data[offset:offset+int(idLen)])
 	offset += int(idLen)
+
+	if len(data[offset:]) < 4 {
+		return fmt.Errorf("data too short to unmarshal createdAt length")
+	}
+	createdAtLen := binary.BigEndian.Uint32(data[offset : offset+4])
+	offset += 4
+
+	if len(data[offset:]) < int(createdAtLen) {
+		return fmt.Errorf("data too short to unmarshal createdAt")
+	}
+	createdAtBytes := data[offset : offset+int(createdAtLen)]
+	offset += int(createdAtLen)
+
+	var createdAt time.Time
+	if err := createdAt.UnmarshalBinary(createdAtBytes); err != nil {
+		return fmt.Errorf("failed to unmarshal createdAt: %w", err)
+	}
+	sp.createdAt = createdAt
 
 	sp.signatures = make(map[string][]byte)
 	for offset < len(data) {
